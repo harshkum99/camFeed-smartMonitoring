@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg
+        # The survey probes real streams through ffprobe, and the GOP measurement is verified
+        # against encoded video rather than mocks.
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Licence gate
+        # Runs before the tests, deliberately. An AGPL or non-commercial dependency is a
+        # commercial defect, not a test failure, and we want it to be the first thing that
+        # goes red. See scripts/license_gate.py for why this exists.
+        run: python scripts/license_gate.py
+
+      - name: Lint
+        run: ruff check sanjay/ tests/ scripts/
+
+      - name: Tests
+        run: pytest -q
+
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector ships in this image; the schema will not apply without it.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sanjay_ci
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+        ports: ["5432:5432"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply migrations
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for f in db/migrations/*.sql; do
+            echo "== $f"
+            psql -h localhost -U postgres -d sanjay_ci -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: Verify the guard rails actually bite
+        # These are DPDP and evidentiary controls enforced in the database rather than in a
+        # policy document. A migration that silently drops one of them is the kind of defect
+        # nobody notices until a regulator does.
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d sanjay_ci -v ON_ERROR_STOP=1 -q -f db/tests/guards.sql
