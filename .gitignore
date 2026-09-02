@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets/
+
+# ML artifacts
+*.pt
+*.pth
+*.onnx
+*.engine
+*.trt
+*.safetensors
+models/weights/
+!models/weights/.gitkeep
+
+# Media & data
+*.mp4
+*.mkv
+*.avi
+*.ts
+*.h264
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+!web/**/public/**
+data/
+media/
+recordings/
+snapshots/
+
+# Local infra
+*.db
+*.sqlite3
+pgdata/
+minio-data/
+redis-data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+logs/
