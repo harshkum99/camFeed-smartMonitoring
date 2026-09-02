@@ -2,6 +2,9 @@
 name = "sanjay"
 version = "0.1.0"
 description = "Project Sanjay — Surveillance Intelligence Platform"
+# Proprietary. Declared explicitly so our own package does not show up as
+# "declares no licence" in the licence gate's output and train people to skim it.
+license = "LicenseRef-Proprietary"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.9",

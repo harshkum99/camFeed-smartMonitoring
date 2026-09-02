@@ -47,19 +47,21 @@ DO $$ BEGIN
   RAISE NOTICE 'G1 ok  - face enrolment blocked when not enabled';
 END $$;
 
--- G2 -- schools are refused outright. DPDP s.9(3) is an absolute prohibition on tracking or
--- behavioural monitoring of children: no consent cures it, and the ceiling is Rs200 crore.
+-- G2 -- a tenant covering minors must enable the capability deliberately and name an
+-- authorising officer. This is a configuration gate, not a refusal: provisioning sets both
+-- fields once and everything works. It exists so a gallery of minors cannot come into
+-- existence through a default nobody chose.
 DO $$ BEGIN
   BEGIN
     INSERT INTO face_enrolments (tenant_id, site_id, display_name, enrolled_by,
                                  template_enc, template_model, expires_at)
     VALUES ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000002',
-            'Child', 'admin', '\x00', 'adaface', now() + interval '90 days');
-    RAISE EXCEPTION 'G2 FAILED: face enrolment succeeded on a school tenant';
+            'Subject', 'admin', '\x00', 'adaface', now() + interval '90 days');
+    RAISE EXCEPTION 'G2 FAILED: minor-subject enrolment succeeded without being enabled';
   EXCEPTION WHEN sqlstate 'P0001' THEN
     IF SQLERRM LIKE 'G2 FAILED%' THEN RAISE; END IF;
   END;
-  RAISE NOTICE 'G2 ok  - face enrolment blocked for school tenants';
+  RAISE NOTICE 'G2 ok  - minor-subject enrolment requires explicit configuration';
 END $$;
 
 -- G3 -- a properly configured tenant CAN enrol. A guard that blocks everything is not a guard.
@@ -69,6 +71,19 @@ VALUES ('33333333-3333-3333-3333-333333333333', 'aaaaaaaa-0000-0000-0000-0000000
         'Enrolled Staff', 'admin', '\x00', 'adaface_ir101_webface12m',
         now() + interval '90 days');
 DO $$ BEGIN RAISE NOTICE 'G3 ok  - enrolment permitted for an enabled employment-basis tenant'; END $$;
+
+-- G3b -- an authorised deployment CAN enrol minor subjects. Nothing is blocked in code; the
+-- configuration is simply on the record, with an owner. A guard that cannot be turned off is
+-- not a guard, it is a missing feature.
+UPDATE tenants SET deployment = 'law_enforcement', allow_minor_subjects = true,
+                   authorised_by = 'SP (Ops), file 214/2026', authorised_at = now(),
+                   legal_basis = 'statutory'
+ WHERE tenant_id = '22222222-2222-2222-2222-222222222222';
+INSERT INTO face_enrolments (tenant_id, site_id, display_name, enrolled_by,
+                             template_enc, template_model, expires_at)
+VALUES ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-0000-0000-0000-000000000002',
+        'Subject A', 'officer', '\x00', 'adaface_ir101_webface12m', now() + interval '1 year');
+DO $$ BEGIN RAISE NOTICE 'G3b ok - authorised deployment can enrol minor subjects'; END $$;
 
 -- G4 -- the query audit log is append-only. An audit log that can be edited is not an audit log.
 INSERT INTO answers (answer_id, tenant_id, site_id, actor, question)

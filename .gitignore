@@ -68,6 +68,9 @@ Thumbs.db
 .vscode/
 *.swp
 
+# Personal Claude Code settings (project-shared settings.json is committed)
+.claude/settings.local.json
+
 # Logs
 *.log
 logs/
