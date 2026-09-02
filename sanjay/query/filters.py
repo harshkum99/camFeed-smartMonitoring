@@ -86,8 +86,8 @@ _TXT_OPS = frozenset({Op.EQ, Op.NE, Op.IN, Op.NOT_IN, Op.IS_NULL, Op.NOT_NULL})
 # and every addition makes the compile step measurably less reliable.
 SCHEMA: dict[Entity, dict[str, Column]] = {
     Entity.TRACKS: {
-        "camera_id":   Column("t.camera_id", "uuid", _TXT_OPS, "which camera"),
-        "class":       Column("t.class", "text", _TXT_OPS, "person, vehicle, bag, forklift"),
+        "camera_id":   Column("t.camera_id", "uuid", _TXT_OPS, "camera"),
+        "class":       Column("t.class", "text", _TXT_OPS, "object class"),
         "ts_start":    Column("t.ts_start", "timestamp", _NUM_OPS,
                               "when the object first appeared"),
         "ts_end":      Column("t.ts_end", "timestamp", _NUM_OPS, "when it was last seen"),
@@ -104,10 +104,9 @@ SCHEMA: dict[Entity, dict[str, Column]] = {
         "upper_colour": Column("t.attrs->>'upper_colour'", "text", _TXT_OPS, "clothing colour"),
     },
     Entity.ZONE_EVENTS: {
-        "camera_id":   Column("z.camera_id", "uuid", _TXT_OPS, "which camera"),
+        "camera_id":   Column("z.camera_id", "uuid", _TXT_OPS, "camera"),
         "zone_id":     Column("z.zone_id", "uuid", _TXT_OPS, "which zone"),
-        "type":        Column("z.type::text", "text", _TXT_OPS,
-                              "enter, exit, cross_pos, cross_neg, dwell, loiter, stationary, gone"),
+        "type":        Column("z.type::text", "text", _TXT_OPS, "event type"),
         "ts":          Column("z.ts", "timestamp", _NUM_OPS, "when it happened"),
         "conf":        Column("z.conf", "number", _NUM_OPS, "confidence 0-1"),
         "track_id":    Column("z.track_id", "uuid", _TXT_OPS, "the object that triggered it"),
@@ -118,6 +117,25 @@ SCHEMA: dict[Entity, dict[str, Column]] = {
 
 TIME_COLUMN = {Entity.TRACKS: "t.ts_start", Entity.ZONE_EVENTS: "z.ts"}
 TABLE_ALIAS = {Entity.TRACKS: "tracks t", Entity.ZONE_EVENTS: "zone_events z"}
+
+# Attribute predicates need their own ambiguity band, separate from detection confidence.
+#
+# A rule like "helmet < 0.5" fires on a score of 0.46 exactly as it fires on 0.04, and if the
+# person detection was confident, both get reported as confident violations. They are not the
+# same thing: 0.46 usually means the head crop was small, or the worker was facing away, or the
+# cap was white. Negative-attribute rules are the highest false-alarm class in the product and
+# the first one a factory tests.
+#
+# The band is a fixed property of the DETECTOR, not of the query. That distinction matters: an
+# earlier version subtracted a margin from whatever threshold the question used, so asking for
+# "helmet < 0.25" narrowed the confident bucket to "< 0.05" and emptied it — punishing the
+# operator for asking a stricter question. Scores in this range are where the model is genuinely
+# unsure; anything outside it is decisive however the question was phrased.
+ATTR_AMBIGUOUS_LOW = 0.35
+ATTR_AMBIGUOUS_HIGH = 0.65
+
+#: Attributes stored as jsonb confidences, for which the margin above applies.
+CONFIDENCE_ATTRS = {"helmet", "vest"}
 
 #: Group-by is restricted to low-cardinality dimensions. Grouping by track_id would return a row
 #: per object and defeat the point of an aggregate.
@@ -351,10 +369,23 @@ def compile_sql(f: Filter, *, tenant_id: str, site_id: str,
         tail = f" ORDER BY {tcol} DESC LIMIT {btail(f.limit)}"
     else:
         counted = f"DISTINCT {alias}.track_id" if f.select is Select.DISTINCT_COUNT else "*"
+
+        # A row is confident only if BOTH the detection was confident AND — where the question
+        # turns on a measured attribute — that attribute is clear of its threshold. Without the
+        # second half, a helmet score of 0.46 is reported as a confident safety violation purely
+        # because we were sure it was a person.
+        def decisive(bind) -> str:
+            clauses = [f"{conf_col} >= {bind(f.min_confidence)}"]
+            for p in f.predicates:
+                extra = _attr_margin_clause(cols, p, bind)
+                if extra:
+                    clauses.append(extra)
+            return " AND ".join(clauses)
+
         # Bound once per occurrence: a value appearing twice in the SQL must be appended twice.
         select_sql = (
-            f"count(*) FILTER (WHERE {conf_col} >= {bsel(f.min_confidence)}) AS confident, "
-            f"count(*) FILTER (WHERE {conf_col} < {bsel(f.min_confidence)}) AS ambiguous, "
+            f"count(*) FILTER (WHERE {decisive(bsel)}) AS confident, "
+            f"count(*) FILTER (WHERE NOT ({decisive(bsel)})) AS ambiguous, "
             f"count({counted}) AS total"
         )
         tail = ""
@@ -368,6 +399,28 @@ def compile_sql(f: Filter, *, tenant_id: str, site_id: str,
            f"WHERE {' AND '.join(where)}{tail}")
     return CompiledQuery(sql, select_params + where_params + tail_params,
                          f.entity, f.select, describe(f))
+
+
+def _attr_margin_clause(cols: dict[str, Column], p: Predicate, bind) -> str | None:
+    """Require a confidence-valued attribute to sit outside the detector's uncertainty band
+    before the row counts as confident.
+
+    A score inside [ATTR_AMBIGUOUS_LOW, ATTR_AMBIGUOUS_HIGH] is one the model could not call, so
+    it belongs in the ambiguous bucket for a human to adjudicate — regardless of how strict the
+    question's own threshold was. Returns None for anything that is not a numeric comparison on
+    such an attribute; equality and set membership have no band to apply.
+    """
+    if p.field not in CONFIDENCE_ATTRS or p.op not in (Op.LT, Op.LTE, Op.GT, Op.GTE):
+        return None
+    if not isinstance(p.value, int | float) or isinstance(p.value, bool):
+        return None
+
+    col = cols[p.field].sql
+    if p.op in (Op.LT, Op.LTE):
+        # Testing for absence: the score must be decisively low.
+        return f"{col} < {bind(ATTR_AMBIGUOUS_LOW)}"
+    # Testing for presence: the score must be decisively high.
+    return f"{col} > {bind(ATTR_AMBIGUOUS_HIGH)}"
 
 
 def describe(f: Filter) -> str:
