@@ -11,11 +11,12 @@ into "no results" is how a surveillance system quietly lies.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sanjay.query.answer import Answer, answer
+from sanjay.query.answer import Answer, answer, log_uninterpreted
 from sanjay.query.nl import Catalog, Compiled, ModelError, Provider, compile_question
 
 
@@ -62,12 +63,17 @@ def ask(
     except ModelError as e:
         # The interpreter is down. Say so plainly rather than reporting an empty result, which
         # would read as "nothing happened" — the most dangerous thing this product can say.
+        _audit(conn, question, tenant_id, site_id, actor, f"interpreter unavailable: {e}", t0)
         return AskResult(question, None, None,
                          refused=f"I could not interpret that question just now ({e}). "
                                  f"The camera record is unaffected — please try again.",
                          latency_ms=_ms(t0))
 
     if compiled.filter is None:
+        # Logged even though it never reached the database: the audit trail records that someone
+        # asked, which is the point of having one.
+        _audit(conn, question, tenant_id, site_id, actor,
+               compiled.unsupported or "could not interpret", t0)
         return AskResult(question, None, compiled,
                          refused=_cannot_interpret(compiled.unsupported),
                          latency_ms=_ms(t0))
@@ -88,6 +94,18 @@ def ask(
                      f"everything else you can see. {a.message}")
 
     return AskResult(question, a, compiled, latency_ms=_ms(t0))
+
+
+def _audit(conn, question, tenant_id, site_id, actor, reason, t0) -> None:
+    """Best-effort audit write. A failure here must not swallow the operator's answer, but it is
+    surfaced rather than silently dropped — an audit trail with silent holes is worse than none."""
+    try:
+        log_uninterpreted(conn, question=question, tenant_id=tenant_id, site_id=site_id,
+                          actor=actor, reason=reason, latency_ms=_ms(t0))
+    except Exception:  # noqa: BLE001
+        conn.rollback()
+        logging.getLogger(__name__).exception(
+            "failed to audit an uninterpreted question from %s", actor)
 
 
 def _humanise(text: str, catalog: Catalog) -> str:

@@ -37,6 +37,12 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.flake8-bugbear]
+# `Depends(...)` and `Header(...)` in a signature default is FastAPI's dependency-injection
+# idiom, not the mutable-default bug B008 exists to catch. Declared here rather than scattering
+# noqa comments through every route.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query", "fastapi.Path"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

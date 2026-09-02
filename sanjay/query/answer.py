@@ -402,6 +402,28 @@ def _log(conn, a: Answer, f: Filter, q: CompiledQuery, tenant_id, site_id, actor
     conn.commit()
 
 
+def log_uninterpreted(
+    conn, *, question: str, tenant_id: str, site_id: str, actor: str,
+    reason: str, latency_ms: int = 0,
+) -> None:
+    """Record a question that never reached the database.
+
+    Easy to overlook, and a real gap when it is: the audit trail is the anti-stalking control
+    and the artefact a security review asks for, so the *attempt* is the event worth recording —
+    not the answer. A question that failed to compile leaves no other trace, which means someone
+    probing the system, or an employee looking up a colleague, would be invisible purely because
+    they phrased it badly.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO answers (tenant_id, site_id, actor, question, intent, "
+            "rows_returned, abstained, abstain_reason, latency_ms) "
+            "VALUES (%s,%s,%s,%s,%s,0,true,'not_measured',%s)",
+            (tenant_id, site_id, actor, question, f"uninterpreted: {reason}"[:200], latency_ms),
+        )
+    conn.commit()
+
+
 def _plan_json(f: Filter):
     from psycopg.types.json import Jsonb
     return Jsonb({

@@ -123,7 +123,7 @@ def test_empty_instruction_does_not_call_the_model():
 def test_explain_states_the_rule_in_plain_english():
     c = author("alert me if anyone enters the chemical store after 8pm")
     text = explain(c.rule, {"cam-gate": "Gate 3 — Main Entry"})
-    assert "Alert when a person enters in Chemical store" in text
+    assert "Alert when a person enters Chemical store" in text
     assert "between 20:00 and 06:00" in text
 
 

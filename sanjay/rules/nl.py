@@ -186,16 +186,19 @@ def explain(rule: Rule, camera_names: dict[str, str] | None = None) -> str:
     else:
         who = f"a {who}"
 
-    where = f" in {t.zone}" if t.zone else ""
+    # Prepositions differ per trigger: you enter a zone but stay *in* one. Getting this wrong
+    # produces "enters in Chemical store", and this sentence is the safety mechanism — an
+    # operator who is squinting at broken grammar is not checking whether the rule is right.
+    zone = t.zone or ""
     action = {
-        "zone_entry": f"{who} enters{where}",
-        "zone_exit": f"{who} leaves{where}",
-        "line_cross": f"{who} crosses {t.zone}"
+        "zone_entry": f"{who} enters {zone}".rstrip(),
+        "zone_exit": f"{who} leaves {zone}".rstrip(),
+        "line_cross": f"{who} crosses {zone}"
                       + ("" if t.direction == "any" else f" ({t.direction.replace('_', ' ')})"),
-        "dwell": f"{who} stays{where} for more than {t.dwell_seconds} seconds",
-        "absence": f"{t.zone} stays empty for more than {t.dwell_seconds} seconds",
-        "count": f"{t.count_threshold} or more {t.object_class}s are{where} at once",
-        "attribute": f"{who} is seen{where}",
+        "dwell": f"{who} stays in {zone} for more than {t.dwell_seconds} seconds",
+        "absence": f"{zone} stays empty for more than {t.dwell_seconds} seconds",
+        "count": f"{t.count_threshold} or more {t.object_class}s are in {zone} at once",
+        "attribute": (f"{who} is seen in {zone}" if zone else f"{who} is seen"),
     }[t.type]
 
     sentence = f"Alert when {action}"
