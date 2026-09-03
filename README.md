@@ -68,3 +68,34 @@ psql -v ON_ERROR_STOP=1 -d smartcam_ci -f db/tests/guards.sql   # database guard
 The licence gate is not optional housekeeping: Ultralytics' AGPL reaches SaaS deployment and
 trained weights, and it arrives as a transitive dependency of half the computer-vision tutorials
 on the internet. It runs first in CI so that a licence problem goes red before the tests do.
+
+## Deploying the console to Vercel
+
+Vercel hosts the console. It does **not** host the API — that needs Postgres and long-lived
+connections, so it stays on a real server (the Indian cloud node), which also keeps camera data
+in-country for the DPDP posture.
+
+So the deployment is a split, and both halves need configuring or the console will load and every
+request will fail:
+
+1. **On Vercel**, set a build-time environment variable:
+
+   ```
+   VITE_API_BASE = https://api.your-domain.com
+   ```
+
+   `vercel.json` already sets the build command, the output directory, and the single-page
+   rewrites, so a bookmarked `/alerts` does not 404.
+
+2. **On the API server**, allow the Vercel origin:
+
+   ```
+   SMARTCAM_ALLOWED_ORIGINS=https://your-app.vercel.app,https://console.your-domain.com
+   ```
+
+   An explicit list, never `*` — this API answers questions about a customer's premises, and a
+   wildcard would let any page a logged-in operator visits query it from their browser.
+
+With `VITE_API_BASE` unset, the console uses relative paths and FastAPI serves it from
+`console/dist` on the same origin. That is the simpler deployment and the one the air-gapped SKU
+uses; Vercel is for demos and for putting the console on a CDN.

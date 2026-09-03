@@ -58,6 +58,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Smart Cam Monitoring", version="0.1.0", lifespan=lifespan)
 
+# Cross-origin access, for when the console is hosted separately from the API (a CDN deploy, a
+# Vercel preview) while the backend stays on a server with the database.
+#
+# Deliberately an explicit allow-list rather than "*": this API answers questions about a
+# customer's premises, and a wildcard would let any page a logged-in operator visits query it
+# from their browser. Set SMARTCAM_ALLOWED_ORIGINS to a comma-separated list of exact origins.
+_origins = [
+    o.strip() for o in os.environ.get("SMARTCAM_ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+if _origins:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["content-type", "x-smartcam-actor", "x-smartcam-tenant",
+                       "x-smartcam-site", "x-smartcam-roles"],
+    )
+
 
 def db():
     """One short-lived connection per request. A pool belongs here eventually; at PoC scale it
