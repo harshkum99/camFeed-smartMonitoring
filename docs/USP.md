@@ -1,4 +1,4 @@
-# Project Sanjay — The USP
+# Smart Cam Monitoring — The USP
 
 ## The problem with the current positioning
 
@@ -12,7 +12,7 @@
 - **Open-source Frigate** ships semantic search, GenAI descriptions and a tool-calling chat agent for
   **zero licence cost**.
 
-So if Sanjay's pitch rests on camera-agnostic natural-language search, we are entering the most crowded
+So if Smart Cam Monitoring's pitch rests on camera-agnostic natural-language search, we are entering the most crowded
 camp in the market with a slide that four better-funded competitors already have.
 
 Meanwhile the Indian market is smaller than the deck assumes. The **entire** disclosed FY25 revenue of
@@ -29,7 +29,7 @@ The differentiation therefore cannot be the AI. It has to be something structura
 
 ## The USP
 
-> ### Sanjay turns the CCTV you already own into a searchable, court-admissible 24-month memory — for less than what one hard disk costs you.
+> ### Smart Cam Monitoring turns the CCTV you already own into a searchable, court-admissible 24-month memory — for less than what one hard disk costs you.
 
 Three things make this defensible in a way that "better AI" is not.
 
@@ -61,7 +61,7 @@ The deck's "we discard your raw video and save you 90% of storage" is, on the re
 best customers, destructive to our own product, and arithmetically wrong in its stated mechanism. So we
 flip it:
 
-> **"Your DVR keeps 23 days. Sanjay keeps 24 months."**
+> **"Your DVR keeps 23 days. Smart Cam Monitoring keeps 24 months."**
 
 We never touch their recording. We add memory on top of it. This removes the single hardest objection in
 every regulated-sector meeting instead of creating it, and it is the only version a bank's risk team signs.
@@ -189,4 +189,4 @@ with no consent cure and a ₹200 crore ceiling), and BFSI (6–12 month securit
 
 ## The one-line positioning
 
-> **Sanjay gives the cameras you already own a memory that stands up in court.**
+> **Smart Cam Monitoring gives the cameras you already own a memory that stands up in court.**

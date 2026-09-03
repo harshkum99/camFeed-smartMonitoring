@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "sanjay-console",
+      "name": "smartcam-console",
       "runtimeExecutable": ".venv/bin/uvicorn",
-      "runtimeArgs": ["sanjay.api.app:app", "--port", "8420", "--reload"],
+      "runtimeArgs": ["smartcam.api.app:app", "--port", "8420", "--reload"],
       "port": 8420
     }
   ]

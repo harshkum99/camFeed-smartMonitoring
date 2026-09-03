@@ -11,8 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sanjay.rules.engine import Detection, RuleEngine, Suppressor, in_schedule
-from sanjay.rules.schema import RuleError, parse_rule, to_json
+from smartcam.rules.engine import Detection, RuleEngine, Suppressor, in_schedule
+from smartcam.rules.schema import RuleError, parse_rule, to_json
 
 T0 = datetime(2026, 9, 3, 6, 0, tzinfo=UTC)      # 11:30 IST
 CAM = "cam-1"

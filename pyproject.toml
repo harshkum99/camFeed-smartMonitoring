@@ -1,7 +1,7 @@
 [project]
-name = "sanjay"
+name = "smartcam"
 version = "0.1.0"
-description = "Project Sanjay — Surveillance Intelligence Platform"
+description = "Smart Cam Monitoring — Surveillance Intelligence Platform"
 # Proprietary. Declared explicitly so our own package does not show up as
 # "declares no licence" in the licence gate's output and train people to skim it.
 license = "LicenseRef-Proprietary"
@@ -21,14 +21,14 @@ dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.8"]
 survey = ["onvif-zeep-async>=3.1", "av>=13"]
 
 [project.scripts]
-sanjay-survey = "sanjay.survey.cli:main"
+smartcam-survey = "smartcam.survey.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["sanjay"]
+packages = ["smartcam"]
 
 [tool.ruff]
 line-length = 100

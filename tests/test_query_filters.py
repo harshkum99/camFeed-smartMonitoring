@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from sanjay.query.filters import (
+from smartcam.query.filters import (
     MAX_LIMIT,
     Entity,
     FilterError,

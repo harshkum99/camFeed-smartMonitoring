@@ -9,11 +9,11 @@ import json
 
 import pytest
 
-from sanjay.survey.cli import build_parser
-from sanjay.survey.discovery import Device, _first_xaddr, expand_cidr, parse_device_time
-from sanjay.survey.grade import ChannelProbe, Grade, grade_channel, size_box
-from sanjay.survey.grammars import Vendor
-from sanjay.survey.report import SurveyResult, now_iso, to_json, to_markdown
+from smartcam.survey.cli import build_parser
+from smartcam.survey.discovery import Device, _first_xaddr, expand_cidr, parse_device_time
+from smartcam.survey.grade import ChannelProbe, Grade, grade_channel, size_box
+from smartcam.survey.grammars import Vendor
+from smartcam.survey.report import SurveyResult, now_iso, to_json, to_markdown
 
 
 def make_result(probes: dict[int, ChannelProbe], devices=None) -> SurveyResult:
@@ -169,7 +169,7 @@ def test_cli_parses_all_three_subcommands():
 
 def test_cli_defaults_to_low_rtsp_concurrency():
     """Opening many simultaneous sessions exhausts a recorder and degrades the customer's own
-    live view. If Sanjay makes their CCTV worse, the deal is dead regardless of AI quality."""
+    live view. If we make their CCTV worse, the deal is dead regardless of AI quality."""
     assert build_parser().parse_args(["probe", "--host", "x"]).concurrency <= 4
 
 

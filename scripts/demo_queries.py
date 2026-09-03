@@ -4,7 +4,7 @@
 This is the rehearsal for the meeting. It deliberately includes questions the system should
 refuse, because that is the part buyers in regulated industries actually test.
 
-    python scripts/demo_queries.py --dsn dbname=sanjay_dev
+    python scripts/demo_queries.py --dsn dbname=smartcam_dev
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ import argparse
 
 import psycopg
 
-from sanjay.query.answer import answer
-from sanjay.query.filters import parse
+from smartcam.query.answer import answer
+from smartcam.query.filters import parse
 
 TENANT = "11111111-1111-1111-1111-111111111111"
 SITE = "aaaaaaaa-0000-0000-0000-000000000001"
@@ -100,7 +100,7 @@ REFUSAL_LABEL = {
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dsn", default="dbname=sanjay_dev")
+    ap.add_argument("--dsn", default="dbname=smartcam_dev")
     args = ap.parse_args()
 
     with psycopg.connect(args.dsn) as conn:

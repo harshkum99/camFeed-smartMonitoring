@@ -1,4 +1,4 @@
--- Project Sanjay — rules, alerts, identity, evidence
+-- Smart Cam Monitoring — rules, alerts, identity, evidence
 --
 -- Biometric data lives in its OWN tables with its own retention clock and its own delete path,
 -- deliberately not mixed into the general event store. That separation is what makes a tenant
@@ -7,7 +7,7 @@
 -- ---------------------------------------------------------------------------
 -- Rules
 --
--- The rule document is JSON with a fixed shape (see sanjay/rules/schema.py). The same document
+-- The rule document is JSON with a fixed shape (see smartcam/rules/schema.py). The same document
 -- is evaluated identically in the browser preview, on the edge agent and in the cloud.
 -- ---------------------------------------------------------------------------
 

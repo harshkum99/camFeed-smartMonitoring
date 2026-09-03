@@ -1,4 +1,4 @@
--- Project Sanjay — core schema
+-- Smart Cam Monitoring — core schema
 --
 -- TWO RULES ENFORCED HERE. Both are near-impossible to retrofit; violating either means
 -- reprocessing the entire corpus.

@@ -1,4 +1,4 @@
-# Project Sanjay — System Architecture
+# Smart Cam Monitoring — System Architecture
 
 Version 1.0 · 2026-09-02 · derived from an 18-agent research sweep (see `docs/research/`)
 
@@ -41,7 +41,7 @@ split it into three lanes that share an event store but never share a latency bu
                     └─────┬────────────────────────────────────┬────┘      │
                           │ outbound HTTPS only, rate-limited  │ MQTT/TLS  │
                           ▼                                    ▼           ▼
-   ┌────────────────────────── SANJAY CLOUD ────────────────────────────────────┐
+   ┌────────────────────────── SMART CAM MONITORING CLOUD ────────────────────────────────────┐
    │                                                                            │
    │   ingest API ──▶ EVENT STORE (Postgres + TimescaleDB + pgvector)           │
    │                    tracks · zone_events · clips · camera_uptime · answers  │
@@ -77,7 +77,7 @@ discovering that during a bank's due diligence is a deal-killer, not a patch.
 | Edge NVR / ingest / decode / motion gate | **Frigate 0.17.2, unforked** | **MIT** ✅ | Ships the boring-but-hard parts already. Verified: the repo LICENSE is MIT; only the *name* and logo are trademarked. |
 | RTSP/ONVIF adapter | go2rtc (embedded in Frigate) | MIT | Widest vendor coverage. Pin the version — single maintainer. |
 | Object detector | **D-FINE-S** (primary), RF-DETR-S (alternate) | **Apache-2.0** ✅ | 50.6 COCO AP at 3.5 ms on T4, beating YOLO11-S's 44.4 AP. Better *and* licence-clean. |
-| ~~Ultralytics YOLO (any version)~~ | **BANNED** | AGPL-3.0 ❌ | Would require open-sourcing all of Sanjay. CI licence gate enforces this. |
+| ~~Ultralytics YOLO (any version)~~ | **BANNED** | AGPL-3.0 ❌ | Would require open-sourcing all of Smart Cam Monitoring. CI licence gate enforces this. |
 | ~~DEIMv2~~ | **BANNED** | custom ❌ | DEIM v1 is Apache; v2 reverted to a commercial-enquiry licence. Easy to grab by accident. |
 | Tracking | ByteTrack → BoT-SORT-ReID where identity matters | MIT | ByteTrack 14.4 ms/frame; BoT-SORT-ReID 32.6 ms — budget ~1 CPU core per stream. |
 | Frame / appearance embeddings | SigLIP2 or jina-clip-v1 via ONNX Runtime | permissive | Powers semantic search and Track & Trace. ~314 FPS on modest silicon — nearly free. |
@@ -124,10 +124,10 @@ research dimensions flagged this as the single most dangerous decision in the pr
 **So the architecture is:**
 
 > The customer's DVR keeps recording exactly as it does today. We never touch it, never delete from it,
-> never become the system of record. Sanjay adds a compact, hash-sealed, searchable index on top —
+> never become the system of record. Smart Cam Monitoring adds a compact, hash-sealed, searchable index on top —
 > and keeps that index for far longer than the DVR keeps video.
 
-This is a *stronger* sales position: **"Your DVR keeps 23 days. Sanjay keeps 24 months, hash-sealed and
+This is a *stronger* sales position: **"Your DVR keeps 23 days. Smart Cam Monitoring keeps 24 months, hash-sealed and
 court-exportable, for less than the cost of one hard disk."** It also removes the customer's biggest
 objection instead of creating it, and it is the only version a bank's risk team will sign.
 
@@ -286,7 +286,7 @@ Each of these was found by an adversarial pass and each has a one-line fix that 
 | **FFmpeg has no RTSP auto-reconnect.** The `reconnect*` options are HTTP-only. | External supervisor: exponential backoff **with jitter** (without it, a switch reboot makes all 40 channels retry in lockstep and the DVR refuses the burst), a global in-flight semaphore, per-device session cap. |
 | **Three clocks disagree** — edge box, DVR OSD burn-in, DVR recording index. Our answers use one, the customer's sanity-check uses another, evidence export uses the third. | ONVIF `GetSystemDateAndTime` is **PRE_AUTH** — measure every device's offset before we even have credentials. Alarm above 30 s drift. Refuse evidence export for a camera that drifted during the window. |
 | **Clock skew breaks authentication.** WS-UsernameToken validates our timestamp against the *device* clock. A 10-minute-out DVR rejects correct credentials with a generic auth error. | Generate every `Created` value in device time, not host time. Otherwise a field engineer loses a day convinced the password is wrong. |
-| **One RTSP session per consumer exhausts the DVR** and degrades the customer's own live view. If Sanjay makes their CCTV worse, the deal is dead regardless of AI quality. | Exactly one upstream session per channel via go2rtc restream; fan out locally. |
+| **One RTSP session per consumer exhausts the DVR** and degrades the customer's own live view. If Smart Cam Monitoring makes their CCTV worse, the deal is dead regardless of AI quality. | Exactly one upstream session per channel via go2rtc restream; fan out locally. |
 | **Frigate's port 5000 bypasses role enforcement entirely** and treats every request as admin. Our sync agent naturally points there. | Bind 5000 to loopback; agent authenticates on 8971. A bank's security review *will* find this. |
 | **Fisheye destroys person detection** — a fisheye-fine-tuned model scores 0.36 mAP on pedestrians, roughly a coin flip. And a PTZ that moves silently invalidates every zone and rule drawn on it. | Dewarp fisheye to 2–4 virtual rectilinear cameras before detection. Bind PTZ zones to named presets; suspend rules when off-preset and log it as a coverage gap. |
 | **Negative-attribute rules ("no helmet") are the false-alarm disaster.** A person facing away or wearing a white cap fires confident violations. It is also the first rule a factory will test. | `min_frames ≥ 5` and mandatory VLM second opinion on every negative-attribute rule. |

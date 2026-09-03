@@ -1,4 +1,4 @@
--- Project Sanjay — partition management, vector indexes, and the coverage function.
+-- Smart Cam Monitoring — partition management, vector indexes, and the coverage function.
 
 -- ---------------------------------------------------------------------------
 -- Monthly partitions.

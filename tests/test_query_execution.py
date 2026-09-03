@@ -14,13 +14,13 @@ import os
 
 import pytest
 
-from sanjay.query.filters import compile_sql, parse
+from smartcam.query.filters import compile_sql, parse
 
 from .test_query_filters import ALL_SHAPES, SITE, TENANT
 
 psycopg = pytest.importorskip("psycopg")
 
-DSN = os.environ.get("SANJAY_TEST_DSN", "dbname=sanjay_ci")
+DSN = os.environ.get("SMARTCAM_TEST_DSN", "dbname=smartcam_ci")
 
 
 @pytest.fixture(scope="module")

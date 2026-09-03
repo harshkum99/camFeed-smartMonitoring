@@ -32,7 +32,7 @@ jobs:
         run: python scripts/license_gate.py
 
       - name: Lint
-        run: ruff check sanjay/ tests/ scripts/
+        run: ruff check smartcam/ tests/ scripts/
 
       - name: Tests
         run: pytest -q
@@ -45,7 +45,7 @@ jobs:
         image: pgvector/pgvector:pg17
         env:
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: sanjay_ci
+          POSTGRES_DB: smartcam_ci
         options: >-
           --health-cmd pg_isready --health-interval 5s
           --health-timeout 5s --health-retries 10
@@ -59,7 +59,7 @@ jobs:
         run: |
           for f in db/migrations/*.sql; do
             echo "== $f"
-            psql -h localhost -U postgres -d sanjay_ci -v ON_ERROR_STOP=1 -q -f "$f"
+            psql -h localhost -U postgres -d smartcam_ci -v ON_ERROR_STOP=1 -q -f "$f"
           done
 
       - name: Verify the guard rails actually bite
@@ -68,4 +68,4 @@ jobs:
         # nobody notices until a regulator does.
         env:
           PGPASSWORD: postgres
-        run: psql -h localhost -U postgres -d sanjay_ci -v ON_ERROR_STOP=1 -q -f db/tests/guards.sql
+        run: psql -h localhost -U postgres -d smartcam_ci -v ON_ERROR_STOP=1 -q -f db/tests/guards.sql

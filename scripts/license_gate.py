@@ -3,7 +3,7 @@
 
 This exists because of a specific, expensive failure mode. Ultralytics states plainly that its
 AGPL-3.0 licence reaches SaaS and API deployments *and* trained weights, so shipping YOLO in a
-closed-source product means open-sourcing all of Sanjay. And `ultralytics` is a transitive
+closed-source product means open-sourcing the whole platform. And `ultralytics` is a transitive
 dependency of a great many computer-vision tutorials, Roboflow notebooks and tracker repos — it
 does not arrive through a deliberate decision, it arrives because someone pip-installed a
 tracking library at 11pm.
@@ -29,7 +29,7 @@ from importlib import metadata
 FORBIDDEN: dict[str, str] = {
     "ultralytics": (
         "AGPL-3.0. Ultralytics states SaaS/API deployment AND trained weights are covered; "
-        "compliance means open-sourcing all of Sanjay. Use D-FINE or RF-DETR (Apache-2.0) — "
+        "compliance means open-sourcing the whole platform. Use D-FINE or RF-DETR (Apache-2.0) — "
         "both score higher on COCO at comparable latency."
     ),
     "insightface": (

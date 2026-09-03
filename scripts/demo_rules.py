@@ -13,9 +13,9 @@ from __future__ import annotations
 import argparse
 from datetime import UTC, datetime, timedelta
 
-from sanjay.query.nl import Catalog
-from sanjay.rules.engine import Detection, RuleEngine
-from sanjay.rules.nl import StubRuleProvider, compile_rule, explain
+from smartcam.query.nl import Catalog
+from smartcam.rules.engine import Detection, RuleEngine
+from smartcam.rules.nl import StubRuleProvider, compile_rule, explain
 
 SITE = "aaaaaaaa-0000-0000-0000-000000000001"
 CAT = Catalog(

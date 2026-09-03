@@ -19,7 +19,7 @@ only works on tidy data is not finished:
 Everything is seeded from a fixed constant: two runs produce identical data, so a test can assert
 an exact count and a demo shows the same numbers twice.
 
-    python scripts/seed_demo.py --dsn dbname=sanjay_dev --days 3
+    python scripts/seed_demo.py --dsn dbname=smartcam_dev --days 3
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def ist(day: datetime, hour: int, minute: int = 0) -> datetime:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dsn", default="dbname=sanjay_dev")
+    ap.add_argument("--dsn", default="dbname=smartcam_dev")
     ap.add_argument("--days", type=int, default=3)
     ap.add_argument("--start", default="2026-09-01", help="first day, YYYY-MM-DD (site local)")
     args = ap.parse_args()
@@ -203,7 +203,7 @@ def _track(rng, cam_id, cls, t0, dur_s, attrs, conf=None) -> tuple:
         uuid.uuid4(), TENANT, SITE, cam_id, cls, t0, t0 + timedelta(seconds=dur_s),
         float(dur_s), conf, round(conf - rng.uniform(0.02, 0.10), 3),
         int(dur_s * 5), psycopg.types.json.Jsonb(attrs),
-        f"s3://sanjay-frames/{cam_id}/{int(t0.timestamp())}.webp",
+        f"s3://smartcam-frames/{cam_id}/{int(t0.timestamp())}.webp",
         f"{uuid.uuid4().hex}{uuid.uuid4().hex}"[:64],
         psycopg.types.json.Jsonb({"detector": "d-fine-s@2026.09", "reid": "clip-reid@2026.09"}),
     )
@@ -212,7 +212,7 @@ def _track(rng, cam_id, cls, t0, dur_s, attrs, conf=None) -> tuple:
 def _event(cam_id, zone_id, track_id, etype, ts, conf, attrs=None) -> tuple:
     return (uuid.uuid4(), TENANT, SITE, cam_id, zone_id, track_id, etype, ts, conf,
             psycopg.types.json.Jsonb(attrs or {}),
-            f"s3://sanjay-frames/{cam_id}/{int(ts.timestamp())}_ev.webp")
+            f"s3://smartcam-frames/{cam_id}/{int(ts.timestamp())}_ev.webp")
 
 
 def _shift_change(rng, day, cams, zones, tracks, events) -> None:

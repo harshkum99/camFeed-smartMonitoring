@@ -6,7 +6,7 @@ RECOGNITION, a salesperson will quote face recognition on that camera.
 
 from __future__ import annotations
 
-from sanjay.survey.grade import (
+from smartcam.survey.grade import (
     BOXES,
     ChannelProbe,
     Grade,

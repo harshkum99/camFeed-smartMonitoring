@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from sanjay.query.nl import Catalog, ModelError
-from sanjay.rules.nl import StubRuleProvider, compile_rule, explain
+from smartcam.query.nl import Catalog, ModelError
+from smartcam.rules.nl import StubRuleProvider, compile_rule, explain
 
 CAT = Catalog(
     cameras={"Gate 3 — Main Entry": "cam-gate", "Zone B — Press Shop": "cam-zoneb",

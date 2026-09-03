@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from sanjay.query.answer import answer
-from sanjay.query.filters import parse
+from smartcam.query.answer import answer
+from smartcam.query.filters import parse
 
 psycopg = pytest.importorskip("psycopg")
 
-DSN = "dbname=sanjay_test"
+DSN = "dbname=smartcam_test"
 TENANT = "11111111-1111-1111-1111-111111111111"
 SITE = "aaaaaaaa-0000-0000-0000-000000000001"
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,12 +42,12 @@ def conn():
         pytest.skip(f"no postgres: {e}")
 
     with admin, admin.cursor() as cur:
-        cur.execute("DROP DATABASE IF EXISTS sanjay_test")
-        cur.execute("CREATE DATABASE sanjay_test")
+        cur.execute("DROP DATABASE IF EXISTS smartcam_test")
+        cur.execute("CREATE DATABASE smartcam_test")
 
     for path in sorted((ROOT / "db" / "migrations").glob("*.sql")):
         r = subprocess.run(  # noqa: S603
-            ["psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", "sanjay_test", "-f", str(path)],
+            ["psql", "-q", "-v", "ON_ERROR_STOP=1", "-d", "smartcam_test", "-f", str(path)],
             capture_output=True, text=True, check=False,
         )
         if r.returncode:

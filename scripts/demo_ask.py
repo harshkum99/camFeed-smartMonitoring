@@ -4,8 +4,8 @@
 Runs with the offline stub by default, so it works with no API key. Pass --gemini to use the
 real model:
 
-    python scripts/demo_ask.py --dsn dbname=sanjay_dev
-    SANJAY_GEMINI_KEY=... python scripts/demo_ask.py --gemini
+    python scripts/demo_ask.py --dsn dbname=smartcam_dev
+    SMARTCAM_GEMINI_KEY=... python scripts/demo_ask.py --gemini
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from datetime import UTC, datetime
 
 import psycopg
 
-from sanjay.query.ask import ask
-from sanjay.query.nl import Catalog, GeminiProvider, StubProvider
+from smartcam.query.ask import ask
+from smartcam.query.nl import Catalog, GeminiProvider, StubProvider
 
 TENANT = "11111111-1111-1111-1111-111111111111"
 SITE = "aaaaaaaa-0000-0000-0000-000000000001"
@@ -38,14 +38,14 @@ QUESTIONS = [
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dsn", default="dbname=sanjay_dev")
+    ap.add_argument("--dsn", default="dbname=smartcam_dev")
     ap.add_argument("--gemini", action="store_true", help="use the real model")
     args = ap.parse_args()
 
     if args.gemini:
-        key = os.environ.get("SANJAY_GEMINI_KEY")
+        key = os.environ.get("SMARTCAM_GEMINI_KEY")
         if not key:
-            raise SystemExit("set SANJAY_GEMINI_KEY to use --gemini")
+            raise SystemExit("set SMARTCAM_GEMINI_KEY to use --gemini")
         provider = GeminiProvider(key)
         label = "Gemini"
     else:

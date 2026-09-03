@@ -1,4 +1,4 @@
-# Infrastructure Request — Project Sanjay PoC
+# Infrastructure Request — Smart Cam Monitoring PoC
 
 **For: Harsh.** Everything on this page is a blocking dependency. Ordered by how much it delays the PoC.
 Prices are Sept 2026 street prices from the research sweep; re-confirm on quote.

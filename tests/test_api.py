@@ -13,7 +13,7 @@ psycopg = pytest.importorskip("psycopg")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from sanjay.api.app import app  # noqa: E402
+from smartcam.api.app import app  # noqa: E402
 
 SITE = "aaaaaaaa-0000-0000-0000-000000000001"
 

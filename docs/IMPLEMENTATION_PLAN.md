@@ -1,4 +1,4 @@
-# Project Sanjay — PoC Implementation Plan
+# Smart Cam Monitoring — PoC Implementation Plan
 
 **Goal:** a proof of concept a factory Safety Officer or Plant Head will believe, running on their own
 cameras, in four weeks.
@@ -15,11 +15,11 @@ Day counts assume continuous build. **A demoable slice exists at Day 6**; the fu
 
 | # | Task | Output |
 |---|---|---|
-| 0.1 | Monorepo layout, Python 3.12 toolchain, ruff/pytest, CI skeleton | `sanjay/` packages build and test |
+| 0.1 | Monorepo layout, Python 3.12 toolchain, ruff/pytest, CI skeleton | `smartcam/` packages build and test |
 | 0.2 | **Licence CI gate** — fail the build on `ultralytics`, `insightface`, DEIMv2, any AGPL/GPL/non-commercial dependency | `scripts/license_gate.py` in CI |
 | 0.3 | Postgres schema, migrations 001–00N. `tenant_id`/`site_id` non-null everywhere; `tracks` partitioned by `ts_start` | `db/migrations/` |
 | 0.4 | Docker Compose: Postgres 16 + TimescaleDB + pgvector + MinIO + API. **Computed `shm_size`.** | `infra/compose.yaml` |
-| 0.5 | Core domain models + repository layer, fully unit-tested against fixtures | `sanjay/core/` |
+| 0.5 | Core domain models + repository layer, fully unit-tested against fixtures | `smartcam/core/` |
 | 0.6 | Synthetic event generator — realistic tracks/zone_events/embeddings for a fictional plant | Query layer is developable with zero cameras |
 
 **Why 0.6 matters:** it decouples every downstream milestone from site access and GPU availability. The
@@ -35,7 +35,7 @@ not technology, are the number one deployment blocker, and 20–40% of Indian si
 
 | # | Task | Output |
 |---|---|---|
-| 1.1 | **`sanjay-survey`** — standalone read-only binary. ONVIF WS-Discovery ∪ TCP sweep (554/80/8000/37777/34567) ∪ credentialed enumeration via Hikvision ISAPI and Dahua/CP-Plus CGI ∪ two-grammar URL fallback | Finds cameras on a real DVR |
+| 1.1 | **`smartcam-survey`** — standalone read-only binary. ONVIF WS-Discovery ∪ TCP sweep (554/80/8000/37777/34567) ∪ credentialed enumeration via Hikvision ISAPI and Dahua/CP-Plus CGI ∪ two-grammar URL fallback | Finds cameras on a real DVR |
 | 1.2 | Per-channel **grading**: measured WxH, fps, codec, **measured GOP** (count frames between IDRs over 10 s), face-pixel density, lens type → `recognition` / `detection` / `anpr` / `degraded` / `unservable` | Signed PDF site-survey report |
 | 1.3 | **Clock reconciliation** via PRE_AUTH `GetSystemDateAndTime` (needs no password). Report offset per device. Generate UsernameToken `Created` in *device* time | Auth works on drifted DVRs |
 | 1.4 | Frigate 0.17.2 on the edge box, per-stream hwaccel preset selected from the probed codec, one go2rtc upstream session per channel | Live detection on real cameras |
@@ -56,8 +56,8 @@ queryable, with measured latency.
 
 | # | Task | Output |
 |---|---|---|
-| 2.1 | Intent router (4 classes: aggregate / lookup / open-vocab / trace). Small cheap classifier, not the big LLM | `sanjay/query/router.py` |
-| 2.2 | **Filter compiler** — LLM emits constrained JSON against a ~20-column whitelist; we compile to parameterised SQL. LLM never writes SQL, never does arithmetic | `sanjay/query/compile.py` |
+| 2.1 | Intent router (4 classes: aggregate / lookup / open-vocab / trace). Small cheap classifier, not the big LLM | `smartcam/query/router.py` |
+| 2.2 | **Filter compiler** — LLM emits constrained JSON against a ~20-column whitelist; we compile to parameterised SQL. LLM never writes SQL, never does arithmetic | `smartcam/query/compile.py` |
 | 2.3 | Semantic search over clip captions with a **mandatory** `(site_id, ts, camera_id)` pre-filter before ANN | |
 | 2.4 | `inspect_frames` re-look tool — retained keyframes back to the VLM. Worth ~1.32× on grounding accuracy alone | |
 | 2.5 | Evidence assembly: every claim carries `{ts, camera, keyframe_uri, bbox, confidence, track_id}` | |
@@ -138,7 +138,7 @@ that says "8 of 11 found, operator confirmed in 20 seconds" wins it.
 
 Five minutes, in this order. Every question is answered from the index, never from video.
 
-1. **Survey.** Run `sanjay-survey` live on their DVR. Cameras appear, graded. *This single moment sells the
+1. **Survey.** Run `smartcam-survey` live on their DVR. Cameras appear, graded. *This single moment sells the
    product more than any accuracy number.*
 2. **Alert, with a stopwatch.** Draw a zone on screen. Type *"alert me if anyone enters this zone after
    8 PM"* in plain English. Walk into it. Alert on the console in under a second, with the evidence frame
@@ -150,8 +150,8 @@ Five minutes, in this order. Every question is answered from the index, never fr
    room. Coverage 0% for that period."* Regulated buyers trust a system that refuses.
 5. **The certificate.** Select the incident, click once, hand them a printed court-filable
    Bharatiya Sakshya Adhiniyam s.63 certificate. **Nobody else in the world does this.**
-6. **The counter.** *"Raw bytes seen: 4.1 TB. Bytes Sanjay kept: 38 GB. Your DVR's oldest frame: 23 days
-   ago. Sanjay's oldest frame: day one."*
+6. **The counter.** *"Raw bytes seen: 4.1 TB. Bytes Smart Cam Monitoring kept: 38 GB. Your DVR's oldest frame: 23 days
+   ago. Smart Cam Monitoring's oldest frame: day one."*
 
 ---
 
@@ -165,7 +165,7 @@ Consumer Protection Act 2019, actionable by the CCPA independently of any custom
 |---|---|
 | "Super-pixelation makes low-res faces identifiable" | *Delete entirely.* Keep enhancement only as a watermarked, non-evidentiary display aid. |
 | "80–95% compression with no loss of analytical detail" | "We index instead of archiving — motion-gated frame selection plus embeddings." |
-| "90% storage saving by discarding your raw video" | "Your DVR keeps recording exactly as it does today. Sanjay adds 24 months of searchable, hash-sealed memory on top." |
+| "90% storage saving by discarding your raw video" | "Your DVR keeps recording exactly as it does today. Smart Cam Monitoring adds 24 months of searchable, hash-sealed memory on top." |
 | "Under 5 seconds across a million cameras" | "Under 5 seconds across every camera on your site, over a continuously built index." |
 | "Alerts in under 2 seconds" | "Under 2 seconds to your live console; under 5 seconds to your phone, typically." |
 | "Trained on 6,000+ incident types" | "Open-vocabulary — describe the incident in plain language and we detect it." (The largest public taxonomies are Kinetics-700 at 700 classes and AVA at 80. The biggest Indian competitor claims 200+. Someone will ask for the list.) |

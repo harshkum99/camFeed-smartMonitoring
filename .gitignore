@@ -74,3 +74,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Node / console build
+console/node_modules/
+console/dist/

@@ -6,13 +6,13 @@ network, a camera, or a subprocess.
 
 from __future__ import annotations
 
-from sanjay.survey.grammars import (
+from smartcam.survey.grammars import (
     Vendor,
     candidates_for,
     fingerprint_http,
     fingerprint_ports,
 )
-from sanjay.survey.probe import CompletedRun, measure_gop_ms, probe_stream
+from smartcam.survey.probe import CompletedRun, measure_gop_ms, probe_stream
 
 # --- grammars --------------------------------------------------------------------------
 

@@ -10,8 +10,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sanjay.query.filters import Entity, Select
-from sanjay.query.nl import (
+from smartcam.query.filters import Entity, Select
+from smartcam.query.nl import (
     Catalog,
     ModelError,
     StubProvider,
@@ -166,7 +166,7 @@ def test_sql_injection_in_a_model_value_is_bound_not_executed():
     c = compile_("x", Canned({"entity": "tracks", "select": "rows", "window": "today",
                               "filters": [{"field": "upper_colour", "op": "eq",
                                            "value": evil}]}))
-    from sanjay.query.filters import compile_sql
+    from smartcam.query.filters import compile_sql
     q = compile_sql(c.filter, tenant_id="t", site_id="s")
     assert evil not in q.sql and evil in q.params
 
@@ -175,7 +175,7 @@ def test_model_cannot_set_the_tenant():
     c = compile_("x", Canned({"entity": "zone_events", "select": "count", "window": "today",
                               "tenant_id": "someone-else", "site_id": "elsewhere",
                               "filters": []}))
-    from sanjay.query.filters import compile_sql
+    from smartcam.query.filters import compile_sql
     q = compile_sql(c.filter, tenant_id="mine", site_id="my-site")
     assert "someone-else" not in q.params and "elsewhere" not in q.params
 
@@ -273,6 +273,6 @@ def test_named_place_still_matches_after_the_stopword_trim():
 
 def test_restatement_shows_camera_names_not_identifiers():
     """The restatement only works as a correctness control if an operator can read it."""
-    from sanjay.query.ask import _humanise
+    from smartcam.query.ask import _humanise
     text = "where camera is cccccccc-0000-0000-0000-000000000001, between ..."
     assert _humanise(text, CAT) == "where camera is Gate 3 — Main Entry, between ..."

@@ -1,4 +1,4 @@
-# Project Sanjay — Decision Log
+# Smart Cam Monitoring — Decision Log
 
 Running record of decisions taken, who took them, and why. Newest last.
 Architecture decisions with real trade-offs get their own file in `docs/adr/`.
@@ -7,7 +7,7 @@ Architecture decisions with real trade-offs get their own file in `docs/adr/`.
 
 ## D-001 — Product scope comes from the IM + pitch deck (2026-09-02)
 
-Source documents: `Project Sanjay IM.pdf`, `Project Sanjay Presentation.pdf` (Karma AI Pvt Ltd).
+Source documents: `Smart Cam Monitoring IM.pdf`, `Smart Cam Monitoring Presentation.pdf` (Karma AI Pvt Ltd).
 
 Five capabilities the platform must deliver:
 
