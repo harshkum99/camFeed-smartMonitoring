@@ -22,6 +22,7 @@ survey = ["onvif-zeep-async>=3.1", "av>=13"]
 
 [project.scripts]
 smartcam-survey = "smartcam.survey.cli:main"
+smartcam-import = "smartcam.ingest.cli:main"
 
 [build-system]
 requires = ["hatchling"]

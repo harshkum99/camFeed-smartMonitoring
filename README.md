@@ -57,6 +57,22 @@ one can actually support. It changes nothing on their equipment.
 .venv/bin/smartcam-survey run --cidr 192.168.1.0/24 --channels 16 --user admin --out survey
 ```
 
+## Importing recorded footage
+
+`smartcam-import` reads a folder of exported footage — a customer's DVR dump, or a public dataset
+standing in for one — and reports what it actually holds before anything is ingested.
+
+```bash
+.venv/bin/smartcam-import ./footage --tz Asia/Kolkata
+```
+
+`--tz` is the timezone the **recorder** was set to, not yours. No export declares an offset, and a
+wrong one shifts every answer by hours without any visible symptom.
+
+The output that matters is the gap list: windows with no footage, which the product must refuse to
+answer about rather than reporting as "nothing happened". See [docs/DATASETS.md](docs/DATASETS.md)
+for which public datasets work as a DVR stand-in and, more importantly, which do not.
+
 ## Tests
 
 ```bash

@@ -103,3 +103,37 @@ PyTorch/vision ecosystem, which lags to 3.12/3.13).
 Consequence: all GPU and heavy-ingest work runs on the cloud box. The repo is structured so services are
 developed locally against small fixtures and deployed to the GPU host for anything real. A cloud
 development server is therefore a **blocking dependency** for the PoC, not a nice-to-have.
+
+---
+
+## D-005 — Public footage stands in for the DVR, and it is MEVA (2026-09-08)
+
+DVR credentials for a live site are not going to arrive in time to unblock ingest. Harsh offered to
+supply pre-recorded footage instead and asked what public data would do the job. Full survey in
+[DATASETS.md](DATASETS.md).
+
+**Chosen: MEVA** (CC BY 4.0, AWS Open Data, unsigned access) as the primary source, with
+**NVIDIA PhysicalAI-SmartSpaces** (CC BY 4.0, synthetic warehouses, 3D ground truth) for the
+vertical and accuracy scoring, and the **Eskişehir workplace-safety set** (CC BY 4.0, real plant)
+for PPE rules.
+
+**Rejected: UCF-Crime / DCSASS**, the datasets you find first on Kaggle. They are research-use-only,
+and we already run a licence gate in CI to keep non-commercial artefacts out of a product we intend
+to sell; footage would be the same mistake with a worse blast radius, sitting underneath a demo
+given to a paying customer. They are also the wrong shape — no camera identity, no wall-clock time,
+no continuity.
+
+Consequences for engineering:
+
+- All three sources are CC BY 4.0. **Attribution is now a shipping requirement** for any demo built
+  on them, in the same way the licence gate is for dependencies.
+- MEVA's filenames carry camera and start/end time, so `smartcam-import` parses filenames as the
+  primary source of truth and treats container metadata and mtime as degraded fallbacks that must be
+  declared in the report.
+- MEVA's collection blocks leave real multi-hour holes (verified: nothing between 12:00 and 16:50 on
+  7 March 2018). Those exercise `coverage_gaps` against unfabricated data, which synthetic seeding
+  never could.
+- MEVA mixes 1920×1072 and 352×240 cameras, so camera grading is exercised for free — several
+  cameras are genuinely below recognition grade.
+- **Face recognition and ANPR stay blocked on real footage.** No public set gives both the pixels
+  (≥64 px IPD, plate-grade optics) and a lawful basis to enrol. We do not fake these in a demo.
