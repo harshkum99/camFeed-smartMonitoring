@@ -11,6 +11,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Coverage } from "@/lib/api"
+import { formatSiteTime, useSite } from "@/lib/site"
 
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
@@ -30,6 +31,7 @@ interface Props {
 }
 
 export function AppShell({ children, coverage, interpreter, online }: Props) {
+  const site = useSite()
   const pct = coverage ? Math.round(coverage.coverage_pct * 100) : null
   // Coverage lives in the chrome, not on a page. An operator who cannot see that a camera has
   // been dark since Tuesday reads every empty answer about it as good news.
@@ -124,14 +126,34 @@ export function AppShell({ children, coverage, interpreter, online }: Props) {
                     )}
                   />
                   <span className="font-mono">{pct}% covered</span>
-                  <span className="hidden lg:inline">last 24h</span>
+                  <span className="hidden lg:inline">
+                    {site?.replay ? "last 24h of the recording" : "last 24h"}
+                  </span>
                 </span>
               </>
             )}
           </div>
         </header>
 
+        {site?.replay && site.as_of && (
+          // A recording answered as if it were live would put every relative word — "today",
+          // "this morning" — on the wrong day. Say so on every page, not in a help text.
+          <div className="border-b bg-primary/10 px-5 py-2 text-xs lg:px-7">
+            <span className="font-medium">Recorded footage</span>
+            <span className="text-muted-foreground">
+              {" "}· {site.name} · questions are answered as of{" "}
+              {formatSiteTime(site.as_of, site.tz, { date: true })}
+            </span>
+          </div>
+        )}
+
         <main className="min-w-0 flex-1 p-5 lg:p-7">{children}</main>
+
+        {site?.attribution && (
+          <footer className="border-t px-5 py-3 text-[11px] text-muted-foreground lg:px-7">
+            Footage: {site.attribution}
+          </footer>
+        )}
       </div>
     </div>
   )

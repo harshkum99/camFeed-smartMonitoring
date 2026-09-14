@@ -10,6 +10,7 @@ import { ZonesPage } from "@/pages/zones"
 import { CamerasPage } from "@/pages/cameras"
 import { AuditPage } from "@/pages/audit"
 import { api, type Coverage } from "@/lib/api"
+import { SiteProvider } from "@/lib/site"
 
 export default function App() {
   const [coverage, setCoverage] = useState<Coverage | null>(null)
@@ -27,6 +28,7 @@ export default function App() {
   }, [])
 
   return (
+    <SiteProvider>
     <BrowserRouter>
       <AppShell coverage={coverage} interpreter={interpreter} online={online}>
         <Routes>
@@ -41,5 +43,6 @@ export default function App() {
       </AppShell>
       <Toaster position="bottom-right" />
     </BrowserRouter>
+    </SiteProvider>
   )
 }

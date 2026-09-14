@@ -21,8 +21,14 @@ against YOLO11-S's 44.4 AP at 3.2 ms. We give up nothing.
 from __future__ import annotations
 
 import argparse
+import ast
+import re
 import sys
+import tomllib
 from importlib import metadata
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
 
 # Packages that must never appear, with the reason. Reasons are printed on failure, because a
 # bare "forbidden" leaves the next engineer no way to make the right call.
@@ -46,21 +52,49 @@ FORBIDDEN: dict[str, str] = {
     "edgeface": "CC BY-NC-SA — non-commercial.",
 }
 
-# Licence strings that are incompatible with a closed-source commercial SaaS. Matched as
-# substrings against the package's declared licence, case-insensitively.
-FORBIDDEN_LICENCES: tuple[str, ...] = (
-    "agpl",
-    "affero",
-    "gpl-2", "gplv2", "gpl v2", "gnu general public license v2",
-    "gpl-3", "gplv3", "gpl v3", "gnu general public license v3",
-    "sspl",
-    "non-commercial", "noncommercial", "cc by-nc", "research only",
-    "commons clause",
+# Licence strings that are incompatible with a closed-source commercial SaaS. Matched against the
+# declared licence after normalisation: lower case, '-' and '_' become spaces. Normalising matters
+# more than it looks — the SPDX id `CC-BY-NC-4.0`, which is exactly how model cards write it,
+# slipped past an earlier pattern written as "cc by-nc".
+FORBIDDEN_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\bagpl", "AGPL"),
+    (r"\baffero\b", "Affero GPL"),
+    (r"\bgpl\s*v?\s*[23]", "GPL"),
+    (r"\bgpl\b", "GPL"),                  # bare "GPL", as older packages declare it
+    (r"\bgnu gpl\b", "GPL"),
+    (r"gnu general public licen[cs]e", "GPL"),
+    (r"\bsspl\b", "SSPL"),
+    (r"\bnon\s*commercial\b", "non-commercial"),
+    (r"\bcc by nc\b", "non-commercial Creative Commons"),
+    (r"\bresearch (only|use)\b", "research-only"),
+    (r"\bcommons clause\b", "Commons Clause"),
+    (r"\bopenrail\b", "OpenRAIL use restrictions"),
 )
 
-# LGPL is fine when dynamically linked, which is how Python uses it. Listed explicitly so nobody
-# "helpfully" adds it to the forbidden list later.
-ALLOWED_DESPITE_MATCH: tuple[str, ...] = ("lgpl", "lesser general public")
+# LGPL is fine when dynamically linked, which is how Python uses it. Its tokens are REMOVED before
+# matching rather than exempting the whole string, so "LGPL-3.0 OR GPL-3.0" still fails on the
+# GPL half instead of passing because the word LGPL appears somewhere in it.
+LGPL_TOKENS = (
+    r"gnu lesser general public licen[cs]e(\s*v?\s*[\d.]+)?(\s*or later)?(\s*\(lgplv?[\d.+]*\))?",
+    r"lesser general public licen[cs]e(\s*v?\s*[\d.]+)?",
+    r"\blgpl\s*v?\s*[\d.]*\s*(only|or later|\+)?",
+)
+
+
+def normalise(licence: str) -> str:
+    low = re.sub(r"[-_]", " ", licence.lower())
+    return re.sub(r"\s+", " ", low).strip()
+
+
+def forbidden_reason(licence: str) -> str | None:
+    text = normalise(licence)
+    for tok in LGPL_TOKENS:
+        text = re.sub(tok, " ", text)
+    for pattern, label in FORBIDDEN_PATTERNS:
+        if re.search(pattern, text):
+            return f"licence is {label}"
+    return None
+
 
 # Packages whose declared metadata is wrong or absent but whose real licence we have verified.
 VERIFIED_OVERRIDES: dict[str, str] = {
@@ -94,6 +128,98 @@ def declared_licence(dist: metadata.Distribution) -> str:
     return " | ".join(p for p in parts if p and p != "UNKNOWN").strip()
 
 
+# --- artefacts that are not Python packages -------------------------------------------------
+#
+# Model weights arrive as files, not as pip packages, so the loop above never sees them — and
+# weights are exactly where non-commercial licences hide (InsightFace's buffalo_l, Ultralytics'
+# .pt files). third_party.toml declares every weights file, independently implemented algorithm
+# and dataset; the ingest loader refuses weights whose hash is not declared there, and this checks
+# the declarations themselves.
+
+ALLOWED_ARTEFACT_LICENCES = {"apache 2.0", "mit", "bsd 2 clause", "bsd 3 clause", "cc by 4.0",
+                             "cc0 1.0"}
+FORBIDDEN_MODELS = ("ultralytics", "yolov5", "yolov8", "yolo11", "yolo12", "insightface",
+                    "buffalo_l", "antelopev2", "deimv2", "edgeface")
+WEIGHT_SUFFIXES = (".onnx", ".pt", ".pth", ".safetensors", ".engine", ".tflite")
+
+
+def check_manifest(root: Path) -> list[tuple[str, str, str]]:
+    path = root / "third_party.toml"
+    if not path.exists():
+        return [("third_party.toml", "-", "manifest missing")]
+    data = tomllib.loads(path.read_text())
+    notices = (root / "THIRD_PARTY_NOTICES.md").read_text().lower() \
+        if (root / "THIRD_PARTY_NOTICES.md").exists() else ""
+    out: list[tuple[str, str, str]] = []
+
+    def bad(name: str, lic: str, why: str) -> None:
+        out.append((f"third_party.toml: {name}", lic, why))
+
+    for kind in ("model", "algorithm", "dataset"):
+        for entry in data.get(kind, []):
+            name = entry.get("name", f"<unnamed {kind}>")
+            lic = entry.get("licence", "")
+            if normalise(lic) not in ALLOWED_ARTEFACT_LICENCES:
+                bad(name, lic, f"{kind} licence is not on the allow-list for shipped artefacts")
+            if name.lower() not in notices:
+                bad(name, lic, "not listed in THIRD_PARTY_NOTICES.md")
+
+    declared_files = set()
+    for m in data.get("model", []):
+        name = m.get("name", "?")
+        declared_files.add(Path(m.get("file", "")).name)
+        if not re.fullmatch(r"[0-9a-f]{64}", str(m.get("sha256", ""))):
+            bad(name, m.get("licence", ""), "sha256 missing or malformed")
+        url = str(m.get("source_url", ""))
+        if not re.search(r"/(resolve|blob|raw)/[0-9a-f]{40}/", url):
+            bad(name, m.get("licence", ""),
+                "source_url must be pinned to a commit, not a branch such as main")
+        hay = f"{name} {url} {m.get('file', '')}".lower()
+        for banned in FORBIDDEN_MODELS:
+            if banned in hay:
+                bad(name, m.get("licence", ""), f"'{banned}' weights are banned (see FORBIDDEN)")
+
+    for a in data.get("algorithm", []):
+        target = root / a.get("path", "")
+        if not target.is_file():
+            bad(a.get("name", "?"), a.get("licence", ""), f"path {a.get('path')} does not exist")
+            continue
+        text = target.read_text()
+        for needle in a.get("header_must_contain", []):
+            if needle not in text:
+                bad(a.get("name", "?"), a.get("licence", ""),
+                    f"{a.get('path')} no longer states its provenance ('{needle}' missing)")
+
+    for file, literal in weight_literals(root / "smartcam"):
+        if Path(literal).name not in declared_files:
+            bad(literal, "-", f"weights file referenced in {file} is not declared in the manifest")
+    return out
+
+
+def weight_literals(package: Path) -> list[tuple[str, str]]:
+    """String constants in the package that name a weights file.
+
+    Only whole path-like literals count — no spaces, ending in a weights suffix — and docstrings
+    are skipped, so explaining in prose that the loader refuses an undeclared .onnx file does not
+    itself fail the gate.
+    """
+    found = []
+    for py in sorted(package.rglob("*.py")):
+        tree = ast.parse(py.read_text())
+        docstrings = {id(n.body[0].value) for n in ast.walk(tree)
+                      if isinstance(n, ast.Module | ast.ClassDef | ast.FunctionDef |
+                                    ast.AsyncFunctionDef)
+                      and n.body and isinstance(n.body[0], ast.Expr)
+                      and isinstance(n.body[0].value, ast.Constant)}
+        joined = {id(v) for n in ast.walk(tree) if isinstance(n, ast.JoinedStr) for v in n.values}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings and id(node) not in joined
+                    and " " not in node.value and node.value.lower().endswith(WEIGHT_SUFFIXES)):
+                found.append((str(py.relative_to(package.parent)), node.value))
+    return found
+
+
 def check(strict: bool = False) -> int:
     violations: list[tuple[str, str, str]] = []
     unknown: list[str] = []
@@ -109,17 +235,13 @@ def check(strict: bool = False) -> int:
             continue
 
         lic = VERIFIED_OVERRIDES.get(key) or declared_licence(dist)
-        low = lic.lower()
-
         if not lic:
             unknown.append(name)
             continue
-        if any(ok in low for ok in ALLOWED_DESPITE_MATCH):
-            continue
-        for bad in FORBIDDEN_LICENCES:
-            if bad in low:
-                violations.append((name, lic, f"licence contains '{bad}'"))
-                break
+        if why := forbidden_reason(lic):
+            violations.append((name, lic, why))
+
+    violations += check_manifest(ROOT)
 
     if violations:
         print("LICENCE GATE FAILED\n", file=sys.stderr)

@@ -11,9 +11,10 @@ import {
   Pill,
 } from "@/components/bits"
 import { REFUSAL_HELP, REFUSAL_LABEL, api, type Answer } from "@/lib/api"
+import { formatSiteTime, useSite } from "@/lib/site"
 import { cn } from "@/lib/utils"
 
-const EXAMPLES = [
+const FACTORY_EXAMPLES = [
   "How many workers entered Zone B without a helmet yesterday?",
   "Was the fire exit blocked at any point yesterday?",
   "Show me anyone at the canteen door on Tuesday.",
@@ -21,6 +22,8 @@ const EXAMPLES = [
 ]
 
 export function AskPage() {
+  const site = useSite()
+  const examples = site?.examples.length ? site.examples : FACTORY_EXAMPLES
   const [q, setQ] = useState("")
   const [answer, setAnswer] = useState<Answer | null>(null)
   const [busy, setBusy] = useState(false)
@@ -57,7 +60,7 @@ export function AskPage() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && run(q)}
-                placeholder="e.g. how many workers entered Zone B without a helmet yesterday?"
+                placeholder={`e.g. ${examples[0]}`}
                 className="pl-9"
               />
             </div>
@@ -68,7 +71,7 @@ export function AskPage() {
           </div>
 
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {EXAMPLES.map((ex) => (
+            {examples.map((ex) => (
               <button
                 key={ex}
                 onClick={() => {
@@ -98,6 +101,9 @@ export function AskPage() {
 function AnswerCard({ a }: { a: Answer }) {
   const refused = a.refused || !!a.abstain_reason
   const cov = Math.round(a.coverage_pct * 100)
+  // Recorders start files a few seconds apart, so a window rarely aligns with a clip to the second.
+  // Those sub-minute holes still count against coverage; they are just not worth an alert box.
+  const gaps = a.gaps.filter((g) => !g.recorded || g.seconds >= 60)
 
   return (
     <Card
@@ -140,13 +146,29 @@ function AnswerCard({ a }: { a: Answer }) {
           </div>
         )}
 
-        {a.gaps.length > 0 && (
+        {a.limits.length > 0 && (
+          <Notice tone="warn" title="What these cameras can and cannot see">
+            {a.limits.map((l) => l.message).join("; ")}.
+          </Notice>
+        )}
+
+        {a.notes.length > 0 && (
+          <Notice tone="warn" title="Not measured everywhere">
+            {a.notes.join("; ")}.
+          </Notice>
+        )}
+
+        {gaps.length > 0 && (
           <Notice tone="warn" title="Coverage gaps in this period">
-            {a.gaps
+            {gaps
               .slice(0, 3)
-              .map((g) => `${g.camera} down ${g.minutes} min`)
+              .map((g) =>
+                g.recorded
+                  ? `${g.camera}: no footage held for ${fmtDuration(g.seconds)}`
+                  : `${g.camera} down ${g.minutes} min`,
+              )
               .join("; ")}
-            {a.gaps.length > 3 && `, and ${a.gaps.length - 3} more`}.
+            {gaps.length > 3 && `, and ${gaps.length - 3} more`}.
           </Notice>
         )}
 
@@ -159,7 +181,7 @@ function AnswerCard({ a }: { a: Answer }) {
         {a.evidence.length > 0 && (
           <div className="space-y-2">
             <Pill tone="primary">{a.evidence.length} evidence frames</Pill>
-            <EvidenceStrip items={a.evidence} />
+            <EvidenceStrip items={a.evidence} tz={a.site_tz} />
           </div>
         )}
 
@@ -169,6 +191,12 @@ function AnswerCard({ a }: { a: Answer }) {
           <div className="border-t pt-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
             <span className="text-foreground">Understood as:</span> {a.describes}
             <span className="mx-1.5">·</span>
+            {a.as_of && (
+              <>
+                answered as of {formatSiteTime(a.as_of, a.site_tz, { date: true })}
+                <span className="mx-1.5">·</span>
+              </>
+            )}
             {a.latency_ms} ms
           </div>
         )}
@@ -199,4 +227,12 @@ function Figure({
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   )
+}
+
+function fmtDuration(seconds: number) {
+  const m = Math.floor(seconds / 60)
+  if (m < 1) return "under a minute"
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60)
+  return m % 60 ? `${h} h ${m % 60} min` : `${h} h`
 }

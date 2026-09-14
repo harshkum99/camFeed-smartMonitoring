@@ -26,8 +26,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta, timezone, tzinfo
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 from smartcam.query.filters import Filter, FilterError, parse, schema_for_prompt
 
@@ -57,12 +58,28 @@ class Catalog:
 
     Built from the database per request. It is also a scope boundary: a name the model invents
     resolves to nothing rather than to some other tenant's camera.
+
+    `tz` is the site's IANA timezone, not a fixed offset: a fixed offset cannot represent daylight
+    saving, and on the day clocks change "today" is 23 or 25 hours long. `as_of` is set for sites
+    whose footage was imported from a recording — relative words like "this morning" then mean the
+    morning of the recording, not of the day someone happens to ask.
     """
 
     cameras: dict[str, str] = field(default_factory=dict)      # name -> camera_id
     zones: dict[str, str] = field(default_factory=dict)        # name -> zone_id
-    tz_offset: timedelta = timedelta(hours=5, minutes=30)
+    tz: str = "Asia/Kolkata"
+    as_of: datetime | None = None
     measured_attrs: set[str] = field(default_factory=set)
+
+    @property
+    def zone(self) -> tzinfo:
+        return ZoneInfo(self.tz)
+
+    @property
+    def tz_offset(self) -> timedelta:
+        """The site's current UTC offset. Kept for callers that only need a label."""
+        ref = self.as_of or datetime.now(UTC)
+        return ref.astimezone(self.zone).utcoffset() or timedelta(0)
 
     @classmethod
     def load(cls, conn, site_id: str) -> Catalog:
@@ -73,7 +90,10 @@ class Catalog:
             cameras = {n: str(c) for c, n in cur.fetchall()}
             cur.execute("SELECT zone_id, name FROM zones WHERE site_id = %s", (site_id,))
             zones = {n: str(z) for z, n in cur.fetchall()}
-        return cls(cameras=cameras, zones=zones)
+            cur.execute("SELECT tz, as_of FROM sites WHERE site_id = %s", (site_id,))
+            row = cur.fetchone()
+        tz, as_of = (row[0], row[1]) if row else ("Asia/Kolkata", None)
+        return cls(cameras=cameras, zones=zones, tz=tz, as_of=as_of)
 
     def resolve_camera(self, name: str) -> str | None:
         return _resolve(name, self.cameras)
@@ -109,32 +129,90 @@ def _norm(s: str) -> str:
 
 # --- time windows -----------------------------------------------------------------------
 
-def named_windows(now: datetime, tz_offset: timedelta) -> dict[str, tuple[str, str]]:
+def named_windows(now: datetime, tz: str | tzinfo | timedelta) -> dict[str, tuple[str, str]]:
     """Precompute the windows people actually ask about, as ISO strings with the site's offset.
 
     The model picks a name; it never does the arithmetic. `now` is passed in rather than read
     from the clock so this is testable and so a demo can be replayed.
+
+    Each endpoint carries its own offset. On a daylight-saving day the two ends of "today" have
+    different offsets, and a window built by adding 24 hours to local midnight would end an hour
+    into tomorrow — or an hour before today is over.
     """
-    local = now + tz_offset
-    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    tzs = _offset_str(tz_offset)
+    zone = _zone(tz)
+    d = now.astimezone(zone).date()
+
+    def at(day: date, hour: int = 0) -> datetime:
+        return datetime.combine(day, time(hour), tzinfo=zone)
 
     def w(a: datetime, b: datetime) -> tuple[str, str]:
-        return (a.strftime("%Y-%m-%dT%H:%M:%S") + tzs, b.strftime("%Y-%m-%dT%H:%M:%S") + tzs)
+        return (a.isoformat(timespec="seconds"), b.isoformat(timespec="seconds"))
 
+    one = timedelta(days=1)
     out = {
-        "today": w(midnight, midnight + timedelta(days=1)),
-        "yesterday": w(midnight - timedelta(days=1), midnight),
-        "this_week": w(midnight - timedelta(days=local.weekday()), midnight + timedelta(days=1)),
-        "last_7_days": w(midnight - timedelta(days=7), midnight + timedelta(days=1)),
-        "last_30_days": w(midnight - timedelta(days=30), midnight + timedelta(days=1)),
-        "this_morning": w(midnight + timedelta(hours=6), midnight + timedelta(hours=12)),
-        "last_night": w(midnight - timedelta(hours=4), midnight + timedelta(hours=6)),
+        "today": w(at(d), at(d + one)),
+        "yesterday": w(at(d - one), at(d)),
+        "this_week": w(at(d - timedelta(days=d.weekday())), at(d + one)),
+        "last_7_days": w(at(d - timedelta(days=7)), at(d + one)),
+        "last_30_days": w(at(d - timedelta(days=30)), at(d + one)),
+        "this_morning": w(at(d, 6), at(d, 12)),
+        "last_night": w(at(d - one, 20), at(d, 6)),
     }
     for i in range(1, 8):
-        d = midnight - timedelta(days=i)
-        out[d.strftime("%A").lower()] = w(d, d + timedelta(days=1))
+        day = d - timedelta(days=i)
+        out[day.strftime("%A").lower()] = w(at(day), at(day + one))
     return out
+
+
+#: Windows that name a single calendar day, to which a clock time like "after 8pm" can apply.
+SINGLE_DAY_WINDOWS = frozenset({"today", "yesterday", "monday", "tuesday", "wednesday",
+                                "thursday", "friday", "saturday", "sunday"})
+
+
+def _zone(tz: str | tzinfo | timedelta) -> tzinfo:
+    if isinstance(tz, timedelta):
+        return timezone(tz)
+    if isinstance(tz, str):
+        return ZoneInfo(tz)
+    return tz
+
+
+def clock_window(window: tuple[str, str], zone: tzinfo, from_time: str | None,
+                 to_time: str | None) -> tuple[str, str]:
+    """Narrow a single-day window to clock times, in the site's own timezone.
+
+    Refuses a local time that does not exist — 02:30 on the morning clocks go forward — rather
+    than letting Python quietly pick an offset for it and shift the window by an hour.
+    """
+    day = datetime.fromisoformat(window[0]).astimezone(zone).date()
+    start = _clock(day, from_time, zone) if from_time else datetime.fromisoformat(window[0])
+    if to_time:
+        # "between 22:00 and 02:00" ends the next day. Decide that from the clock readings before
+        # building the end instant: building 02:00 on the start day first would refuse a time that
+        # only fails to exist on that day — which on a clocks-forward day it does.
+        wraps = bool(from_time) and _hhmm(to_time) <= _hhmm(from_time)
+        end = _clock(day + timedelta(days=1) if wraps else day, to_time, zone)
+    else:
+        end = datetime.fromisoformat(window[1])
+    return start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds")
+
+
+def _hhmm(text: str | None) -> tuple[int, int]:
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", (text or "").strip())
+    return (int(m.group(1)), int(m.group(2))) if m else (-1, -1)
+
+
+def _clock(day: date, hhmm: str, zone: tzinfo) -> datetime:
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", hhmm.strip())
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        raise FilterError(f"clock time must be HH:MM in 24-hour form, got {hhmm!r}")
+    naive = datetime.combine(day, time(int(m.group(1)), int(m.group(2))))
+    aware = naive.replace(tzinfo=zone)
+    if aware.astimezone(UTC).astimezone(zone).replace(tzinfo=None) != naive:
+        raise FilterError(
+            f"{hhmm} did not exist on {day:%d %b %Y} at this site (the clocks changed); "
+            f"choose a time outside the daylight-saving jump")
+    return aware
 
 
 def _offset_str(off: timedelta) -> str:
@@ -166,11 +244,15 @@ Emit ONLY a JSON object with these keys:
   group_by         optional, e.g. ["camera_id"] when the question says "by camera" or
                    "which outlet/area".
   limit            optional, for "rows".
+  from_time        optional "HH:MM" (24-hour, site-local) for "after 8pm", "between 11:55 and
+  to_time          12:00". Only with a single-day window (today, yesterday, a weekday name).
 
 Rules that matter:
   - Attributes are CONFIDENCES from 0 to 1, never true/false. "without a helmet" is
     {"field":"helmet","op":"lt","value":0.5}. "wearing a helmet" is op "gt".
   - If the question does not name a place, leave cameras empty rather than guessing one.
+  - Object classes are "person" and "vehicle". Presence questions on tracks should filter class.
+  - If the site lists no zones, zone_events holds nothing: answer presence questions from tracks.
   - If the question cannot be expressed with the listed fields, emit
     {"unsupported": "<short reason>"} instead of forcing it. That is a correct answer.
 
@@ -178,12 +260,13 @@ Return the JSON object and nothing else."""
 
 
 def build_user_prompt(question: str, catalog: Catalog, now: datetime) -> str:
-    windows = named_windows(now, catalog.tz_offset)
+    windows = named_windows(now, catalog.zone)
+    local = now.astimezone(catalog.zone)
+    replay = " — recorded footage; questions are answered as of this time" if catalog.as_of else ""
     lines = [
         f"Question: {question}",
         "",
-        f"Site local time now: {(now + catalog.tz_offset):%Y-%m-%d %H:%M} "
-        f"({(now + catalog.tz_offset):%A}).",
+        f"Site local time now: {local:%Y-%m-%d %H:%M} ({local:%A}) in {catalog.tz}{replay}.",
         "",
         "Time windows (use the NAME in the `window` field):",
     ]
@@ -193,6 +276,8 @@ def build_user_prompt(question: str, catalog: Catalog, now: datetime) -> str:
     if catalog.zones:
         lines += ["", "Zones:"]
         lines += [f"  {n}" for n in sorted(catalog.zones)]
+    else:
+        lines += ["", "No zones are drawn at this site, so zone_events holds no data."]
     lines += ["", "Fields:", schema_for_prompt()]
     return "\n".join(lines)
 
@@ -233,8 +318,8 @@ def compile_question(
     if isinstance(raw.get("unsupported"), str):
         return Compiled(None, raw, unsupported=raw["unsupported"])
 
-    payload, unresolved = _to_filter_payload(raw, catalog, now)
     try:
+        payload, unresolved = _to_filter_payload(raw, catalog, now)
         return Compiled(parse(payload), raw, unresolved=unresolved)
     except FilterError as first:
         repair = (
@@ -246,8 +331,8 @@ def compile_question(
         raw2 = _ask(provider, SYSTEM, repair)
         if isinstance(raw2.get("unsupported"), str):
             return Compiled(None, raw2, unsupported=raw2["unsupported"], repaired=True)
-        payload2, unresolved2 = _to_filter_payload(raw2, catalog, now)
         try:
+            payload2, unresolved2 = _to_filter_payload(raw2, catalog, now)
             return Compiled(parse(payload2), raw2, repaired=True, unresolved=unresolved2)
         except FilterError as second:
             # Two failures means the question is outside what the schema can express. Declining
@@ -274,8 +359,17 @@ def _to_filter_payload(raw: dict[str, Any], catalog: Catalog,
     rather than dropped: silently ignoring a camera the operator named would answer a different
     question from the one they asked.
     """
-    windows = named_windows(now, catalog.tz_offset)
-    win = windows.get(str(raw.get("window", "")).strip().lower())
+    windows = named_windows(now, catalog.zone)
+    name = str(raw.get("window", "")).strip().lower()
+    win = windows.get(name)
+    from_time, to_time = raw.get("from_time"), raw.get("to_time")
+    if (from_time or to_time) and win:
+        if name not in SINGLE_DAY_WINDOWS:
+            raise FilterError(
+                f"from_time/to_time only apply to a single-day window "
+                f"({', '.join(sorted(SINGLE_DAY_WINDOWS))}), not '{name}'")
+        win = clock_window(win, catalog.zone, from_time and str(from_time),
+                           to_time and str(to_time))
     start, end = win if win else (raw.get("start"), raw.get("end"))
 
     payload: dict[str, Any] = {
@@ -329,9 +423,15 @@ class StubProvider:
     #: version included "zone" and "shop", which stopped "Zone B" from matching at all.
     STOPWORDS = frozenset({"camera", "main", "area", "line", "the"})
 
+    VEHICLE_WORDS = frozenset({"vehicle", "vehicles", "car", "cars", "truck", "trucks",
+                               "van", "vans"})
+    PASSAGE_WORDS = frozenset({"entered", "enter", "entering", "crossed", "passed", "through"})
+    _T = r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"
+
     def complete(self, system: str, user: str) -> dict[str, Any]:
         q = user.split("\n", 1)[0].removeprefix("Question:").strip().lower()
         tokens = set(_norm(q).split())
+        has_zones = "\nZones:" in user
 
         window = "today"
         # Weekday names first: they are the most specific, and an earlier version omitted them
@@ -344,31 +444,78 @@ class StubProvider:
                 window = name.replace(" ", "_")
                 break
 
-        # Whole-word matching only. Substring matching is what let "blocked" select a camera
-        # whose name happens to contain "Block".
-        cameras = []
-        for n in _prompt_names(user, "Cameras at this site:"):
-            words = {w for w in _norm(n).split() if len(w) > 2} - self.STOPWORDS
-            if _norm(n) in _norm(q) or (words and words & tokens):
-                cameras.append(n)
+        cameras = self._cameras(_prompt_names(user, "Cameras at this site:"), q, tokens)
+        base: dict[str, Any] = {"window": window, "cameras": cameras}
+        base.update(self._clock(q))
 
-        if "helmet" in q or "ppe" in q:
-            return {"entity": "zone_events", "select": "distinct_count", "window": window,
-                    "cameras": cameras,
+        cls = "vehicle" if tokens & self.VEHICLE_WORDS else "person"
+        presence = [{"field": "class", "op": "eq", "value": cls}]
+
+        if "helmet" in q or "ppe" in tokens:
+            if not has_zones:
+                return {**base, "entity": "tracks", "select": "distinct_count",
+                        "filters": [*presence, {"field": "helmet", "op": "lt", "value": 0.5}]}
+            return {**base, "entity": "zone_events", "select": "distinct_count",
                     "filters": [{"field": "helmet", "op": "lt", "value": 0.5}]}
         if "block" in q or "obstruct" in q:
-            return {"entity": "zone_events", "select": "rows", "window": window,
-                    "cameras": cameras, "limit": 20,
+            return {**base, "entity": "zone_events", "select": "rows", "limit": 20,
                     "filters": [{"field": "type", "op": "eq", "value": "stationary"}]}
+        # Passing a point is a zone question even where no zone is drawn: the answer layer then
+        # says the line was never drawn, which is true, instead of counting presence and
+        # reporting it as a count of entries.
+        passage = bool(tokens & self.PASSAGE_WORDS)
         if "how many" in q or "count" in q:
-            return {"entity": "zone_events", "select": "distinct_count", "window": window,
-                    "cameras": cameras,
-                    "filters": [{"field": "type", "op": "eq", "value": "cross_pos"}]}
-        if "who" in q or "anyone" in q or "show me" in q:
-            return {"entity": "zone_events", "select": "rows", "window": window,
-                    "cameras": cameras, "limit": 20,
-                    "filters": [{"field": "type", "op": "in", "value": ["enter", "loiter"]}]}
+            if has_zones or passage:
+                return {**base, "entity": "zone_events", "select": "distinct_count",
+                        "filters": [{"field": "type", "op": "eq", "value": "cross_pos"}]}
+            return {**base, "entity": "tracks", "select": "distinct_count", "filters": presence}
+        if "who" in tokens or "anyone" in q or "show me" in q:
+            if has_zones:
+                return {**base, "entity": "zone_events", "select": "rows", "limit": 20,
+                        "filters": [{"field": "type", "op": "in", "value": ["enter", "loiter"]}]}
+            return {**base, "entity": "tracks", "select": "rows", "limit": 20, "filters": presence}
         return {"unsupported": "this question is outside what the stub provider handles"}
+
+    def _cameras(self, names: list[str], q: str, tokens: set[str]) -> list[str]:
+        """Whole-word matching, preferring words that identify one camera.
+
+        "Admin G329" selects G329 only: "g329" names one camera, and "admin", which two cameras
+        share, is already explained by it. "The admin cameras" selects both, because no
+        identifying word was given. "Bus G340 or the admin cameras" selects all three, because
+        "admin" is not explained by G340 — dropping it would quietly answer a narrower question.
+        """
+        words = {n: {w for w in _norm(n).split() if len(w) > 2} - self.STOPWORDS for n in names}
+        counts: dict[str, int] = {}
+        for ws in words.values():
+            for w in ws:
+                counts[w] = counts.get(w, 0) + 1
+        selected = [n for n in names
+                    if _norm(n) in _norm(q) or any(counts[w] == 1 for w in words[n] & tokens)]
+        covered = set().union(*(words[n] for n in selected)) if selected else set()
+        for w in sorted(tokens - covered):
+            if counts.get(w, 0) > 1:
+                selected += [n for n in names if w in words[n] and n not in selected]
+        return selected
+
+    def _clock(self, q: str) -> dict[str, str]:
+        t = self._T
+        for pattern, keys in ((rf"between {t} and {t}", ("from_time", "to_time")),
+                              (rf"from {t} (?:to|until) {t}", ("from_time", "to_time")),
+                              (rf"after {t}", ("from_time",)),
+                              (rf"before {t}", ("to_time",))):
+            m = re.search(pattern, q)
+            if not m:
+                continue
+            groups = m.groups()
+            out = {}
+            for i, key in enumerate(keys):
+                h, mi, ap = groups[3 * i: 3 * i + 3]
+                if mi is None and ap is None:
+                    return {}          # "after 5" is a count, not a time
+                hour = int(h) % 12 + (12 if ap == "pm" else 0) if ap else int(h)
+                out[key] = f"{hour:02d}:{int(mi or 0):02d}"
+            return out
+        return {}
 
 
 def _prompt_names(user: str, header: str) -> list[str]:

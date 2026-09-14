@@ -137,3 +137,51 @@ Consequences for engineering:
   cameras are genuinely below recognition grade.
 - **Face recognition and ANPR stay blocked on real footage.** No public set gives both the pixels
   (≥64 px IPD, plate-grade optics) and a lawful basis to enrol. We do not fake these in a demo.
+
+---
+
+## D-006 — First real slice: recorded footage through the whole product (2026-09-14)
+
+Six MEVA clips (three cameras × 11:55 and 13:50 on 11 March 2018) go through decode → D-FINE-S →
+ByteTrack → tracks, keyframes, clips and uptime → the unchanged `/api/ask` and console. Measurements
+behind every choice are in [research/detector-tracker-benchmark.md](research/detector-tracker-benchmark.md).
+
+**Settled here, and why:**
+
+| Decision | Choice | Reason |
+|---|---|---|
+| Detector | D-FINE-S, 640×640, ONNX on CPU | 0.70 person recall on near-field MEVA at 142 ms/frame; Apache-2.0 at every size. Pinned by sha256 in `third_party.toml`; the loader refuses any other file. |
+| Tracker | ByteTrack association, implemented from scratch | Best or tied at every rate. The `trackers` package drags matplotlib, full OpenCV and PyAV onto an edge box; the reference repo's Kalman filter is reported to descend from GPL deep_sort. |
+| Sampling | 5 fps, no motion gate yet | Tracking collapses below ~5 fps (33/37 annotated people at 5 fps, 12/37 at 1 fps). The gate saves CPU only; it was cut from this slice so a correctness change does not ship bundled with an optimisation. |
+| Time | frame index, never pts | MEVA AVI pts are N/A after a few frames. `ts = clip start + n / fps`, and the KPF ground truth indexes the same way. |
+| "Now" for a recording | `sites.as_of` = end of analysed footage | "Today" asked of a 2018 recording must mean that day, not the wall clock. |
+| Timezone | per-site IANA zone, per-endpoint offsets | A fixed offset cannot represent DST; 11 March 2018 in New York is 23 hours long. |
+| Blind cameras | `cameras.capabilities`, per class, from ground-truth scoring | A 1080p camera watching a car park from 60 m has 5% person recall. Uptime cannot say that; without it the camera's silence became a confident "no one was there". |
+| Evidence hash | `frame_sha256` = hash of the derived JPEG; `clips.source_sha256` = hash of the recorder's file | Only the second is an evidentiary anchor. The BSA s.63 certificate must cite it. |
+| Keyframe access | server-configured tenant/site only, bytes hashed then served from one read | The x-smartcam-* headers are not a security boundary; on this route they would have been an image exfiltration path. |
+
+**What changed in the query layer's honesty rules:**
+
+- An attribute nobody measured is refused as `not_measured` before the query runs, with no rows or
+  evidence attached — including for `is_null` / `not_in` predicates, which used to return every
+  unmeasured row as a match. Measured on some cameras only → answered for those, naming the rest.
+- A zone question on cameras with no zones drawn is `not_measured`, not `no_evidence`.
+- `no_evidence` can never be emitted while a camera in scope is unreliable, unassessed, or has no
+  detector for the asked class. Their tracks never count as confident.
+- Tracks are confident on mean detection score, not peak: every track that survives tracking has a
+  peak above 0.5, which made the ambiguous bucket permanently empty.
+- Gaps on recorded cameras read "has no footage for", not "was down for".
+
+**Found along the way:** `.gitignore`'s `*.ts` (meant for MPEG transport streams) had silently kept
+every TypeScript source under `console/src/lib` and `vite.config.ts` out of git, so a clean checkout
+of `main` could not build the console. Fixed with a scoped negation.
+
+**Open, and deliberately not decided by engineering:**
+
+- MEVA frames show identifiable faces. Whether they are shown unblurred in customer demos is a
+  product/legal call. Stored evidence stays original pixels either way.
+- The tenant's `legal_basis` is recorded as `consent` (MEVA subjects were recruited participants).
+  It is recorded, not relied on.
+- **Known hazard, not fixed:** `drop_partitions_before` (003) drops whole months for every tenant.
+  A future retention job built on it would delete the 2018-03 MEVA index. Retention must become
+  per-tenant before any job calls it.

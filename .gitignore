@@ -28,7 +28,8 @@ build/
 credentials.json
 secrets/
 
-# ML artifacts
+# ML artifacts and local ingest data (keyframes, run logs, model files)
+var/
 *.pt
 *.pth
 *.onnx
@@ -44,6 +45,10 @@ models/weights/
 *.avi
 *.ts
 *.h264
+# ...but *.ts above means MPEG transport streams, not TypeScript. Without this, the console's
+# TypeScript sources were silently never committed and a clean checkout could not build.
+!console/src/**/*.ts
+!console/*.config.ts
 *.jpg
 *.jpeg
 *.png

@@ -303,17 +303,26 @@ def _scalar(name: str, col: Column, value: Any) -> None:
 
 
 def compile_sql(f: Filter, *, tenant_id: str, site_id: str,
-                camera_ids: list[str] | None = None) -> CompiledQuery:
+                camera_ids: list[str] | None = None,
+                unreliable_camera_ids: list[str] | None = None) -> CompiledQuery:
     """Compile a validated Filter to parameterised SQL.
 
     `tenant_id`, `site_id` and `camera_ids` come from the authenticated session and are never
     model-supplied. They are appended after the model's predicates so no filter can widen scope
     beyond what the caller is entitled to see.
+
+    `unreliable_camera_ids` are cameras measured as unable to detect the asked class reliably.
+    Their rows still count towards the total — they are real detections — but never towards the
+    confident figure, because a camera with 5% recall cannot vouch for anything it reports.
     """
     cols = SCHEMA[f.entity]
     alias = "t" if f.entity is Entity.TRACKS else "z"
     tcol = TIME_COLUMN[f.entity]
-    conf_col = "t.conf_max" if f.entity is Entity.TRACKS else "z.conf"
+    # A track is confident on its MEAN detection score, not its peak. The peak of a track that
+    # was seen clearly once and marginally twenty times says more about one frame than about the
+    # track; on real footage every track that survives tracking has a peak above 0.5, so a peak
+    # threshold would put nothing in the ambiguous bucket and the count triple would be hollow.
+    conf_col = "t.conf_mean" if f.entity is Entity.TRACKS else "z.conf"
 
     # Placeholders are POSITIONAL, so parameters must be collected in the order the
     # placeholders appear in the finished SQL text — SELECT, then WHERE, then trailing clauses.
@@ -376,6 +385,9 @@ def compile_sql(f: Filter, *, tenant_id: str, site_id: str,
         # because we were sure it was a person.
         def decisive(bind) -> str:
             clauses = [f"{conf_col} >= {bind(f.min_confidence)}"]
+            if unreliable_camera_ids:
+                clauses.append(f"{alias}.camera_id <> ALL({bind(list(unreliable_camera_ids))}"
+                               f"::uuid[])")
             for p in f.predicates:
                 extra = _attr_margin_clause(cols, p, bind)
                 if extra:

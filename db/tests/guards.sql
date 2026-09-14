@@ -190,6 +190,53 @@ BEGIN
   RAISE NOTICE 'G9 ok  - % tracks partition(s) present', n;
 END $$;
 
+-- G10 -- uptime rows take their tenant and site from the camera, and a row naming someone
+-- else's site is refused. Without this, an importer bug writes coverage under the wrong customer
+-- and nothing notices, because camera_uptime has no other link to a tenant.
+DO $$
+DECLARE t UUID;
+BEGIN
+  INSERT INTO camera_uptime (camera_id, site_id, ts_start, ts_end, state)
+  VALUES ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+          '2026-09-02 10:00+00', '2026-09-02 11:00+00', 'online');
+  SELECT tenant_id INTO t FROM camera_uptime
+   WHERE camera_id = 'cccccccc-0000-0000-0000-000000000001' AND ts_start = '2026-09-02 10:00+00';
+  IF t IS DISTINCT FROM '11111111-1111-1111-1111-111111111111' THEN
+    RAISE EXCEPTION 'G10 FAILED: uptime tenant_id was not filled from the camera (got %)', t;
+  END IF;
+  BEGIN
+    INSERT INTO camera_uptime (camera_id, tenant_id, site_id, ts_start, ts_end, state)
+    VALUES ('cccccccc-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
+            gen_random_uuid(), '2026-09-02 12:00+00', '2026-09-02 13:00+00', 'online');
+    RAISE EXCEPTION 'G10 FAILED: uptime row naming a foreign site was accepted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE 'G10 FAILED%' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'G10 ok - uptime scope is derived from the camera and cannot be misattributed';
+END $$;
+
+-- G11 -- overlapping uptime rows are merged, not double-counted. Two rows covering the same hour
+-- on one camera, next to a camera that was dark for the whole hour, must read 50% — the old
+-- summing version read 100% and hid the dark camera entirely.
+DO $$
+DECLARE cams UUID[] := ARRAY['cccccccc-0000-0000-0000-000000000001',
+                             'cccccccc-0000-0000-0000-000000000003']::UUID[];
+        pct REAL;
+BEGIN
+  INSERT INTO camera_uptime (camera_id, site_id, ts_start, ts_end, state) VALUES
+    ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+     '2026-09-03 10:00+00', '2026-09-03 11:00+00', 'online'),
+    ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+     '2026-09-03 10:00:01+00', '2026-09-03 11:00+00', 'online'),
+    ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001',
+     '2026-09-03 10:15+00', '2026-09-03 10:45+00', 'online');
+  pct := coverage_pct(cams, '2026-09-03 10:00+00', '2026-09-03 11:00+00');
+  IF abs(pct - 0.5) > 0.001 THEN
+    RAISE EXCEPTION 'G11 FAILED: overlapping rows gave coverage %, expected 0.5', pct;
+  END IF;
+  RAISE NOTICE 'G11 ok - overlapping uptime is merged before coverage is computed';
+END $$;
+
 ROLLBACK;
 
 \echo 'all guard-rail assertions passed'

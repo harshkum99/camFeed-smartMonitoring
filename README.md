@@ -73,6 +73,34 @@ The output that matters is the gap list: windows with no footage, which the prod
 answer about rather than reporting as "nothing happened". See [docs/DATASETS.md](docs/DATASETS.md)
 for which public datasets work as a DVR stand-in and, more importantly, which do not.
 
+## Analysing recorded footage (first real slice)
+
+The index can be built from real video rather than from the synthetic seeder. The worked example
+uses public MEVA footage (CC BY 4.0) — see [docs/DATASETS.md](docs/DATASETS.md).
+
+```bash
+pip install -e ".[ingest]"          # onnxruntime, numpy, scipy, pillow
+psql -d smartcam_dev -f db/migrations/005_recorded_ingest.sql
+
+# The detector file is declared, with its sha256 and licence evidence, in third_party.toml.
+# Download it to var/models/dfine_s_coco/model.onnx; the loader refuses any other file.
+
+smartcam-ingest run  <footage dir> --site meva --tz America/New_York --convention meva
+smartcam-ingest score --site meva --annotations <MEVA KPF dir> --write-capabilities
+python scripts/demo_meva.py
+
+SMARTCAM_TENANT=<printed by run> SMARTCAM_SITE=<printed by run> \
+  .venv/bin/uvicorn smartcam.api.app:app --port 8420
+```
+
+About 4 minutes of CPU per 5-minute 1080p clip at 5 fps on an M2 laptop. `--tz` is required and
+must be the recorder's timezone; a wrong one moves every track by hours with no visible symptom.
+Keyframes and run logs go to `var/smartcam` (override with `SMARTCAM_DATA_DIR`); source footage is
+only ever read.
+
+Any screen or slide showing MEVA footage must carry its attribution, which the console prints in
+its footer. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Tests
 
 ```bash

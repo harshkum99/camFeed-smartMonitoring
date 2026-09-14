@@ -2,10 +2,12 @@
  *  pages — an operator learning that amber means "needs a look" on one screen must not find it
  *  meaning something else on the next. */
 
+import { useState } from "react"
 import { AlertTriangle, Check, Info, X } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import type { Evidence, Grade, Severity } from "@/lib/api"
+import { API_BASE, type Evidence, type Grade, type Severity } from "@/lib/api"
+import { formatSiteTime } from "@/lib/site"
 
 /* ---------- status ---------- */
 
@@ -117,44 +119,87 @@ export function CoverageBar({ pct, className }: { pct: number; className?: strin
 }
 
 /* ---------- evidence ----------
- * Never paraphrase a claim you cannot attach a frame to. Until real keyframes are wired, the
- * placeholder is deliberately obvious rather than a fake image — a plausible-looking fake frame
- * in a demo is worse than an honest gap. */
+ * Never paraphrase a claim you cannot attach a frame to. The stored frame is the original
+ * picture; the box is drawn here, over it, so the evidence itself is never altered. When no frame
+ * is held the placeholder stays deliberately obvious — a plausible-looking fake frame in a demo is
+ * worse than an honest gap. */
 
-export function EvidenceStrip({ items }: { items: Evidence[] }) {
+export function EvidenceStrip({ items, tz }: { items: Evidence[]; tz?: string }) {
   if (!items.length) return null
   return (
-    <div className="flex gap-2.5 overflow-x-auto pb-1">
-      {items.slice(0, 14).map((e, i) => {
-        const attrs = Object.entries(e.attrs || {}).filter(([, v]) => typeof v === "number")
-        return (
-          <figure
-            key={`${e.track_id}-${i}`}
-            className="w-36 shrink-0 overflow-hidden rounded-lg border bg-card"
-          >
-            <div className="grid h-20 place-items-center bg-[repeating-linear-gradient(45deg,var(--muted),var(--muted)_6px,transparent_6px,transparent_12px)] text-[10px] font-mono text-muted-foreground">
-              frame pending
-            </div>
-            <figcaption className="space-y-0.5 p-2 text-[11px] leading-tight">
-              <div className="font-mono font-medium">
-                {new Date(e.ts).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                })}
-              </div>
-              <div className="truncate text-muted-foreground" title={e.camera}>
-                {e.camera}
-              </div>
-              <div className="font-mono text-muted-foreground">
-                conf {e.confidence.toFixed(2)}
-                {attrs.map(([k, v]) => ` · ${k} ${v}`)}
-              </div>
-            </figcaption>
-          </figure>
-        )
-      })}
+    <div className="flex gap-3 overflow-x-auto pb-1">
+      {items.slice(0, 14).map((e, i) => (
+        <EvidenceFrame key={`${e.track_id}-${i}`} e={e} tz={tz} />
+      ))}
     </div>
+  )
+}
+
+function EvidenceFrame({ e, tz }: { e: Evidence; tz?: string }) {
+  const [failed, setFailed] = useState(false)
+  const [ratio, setRatio] = useState<number | null>(null)
+  const attrs = Object.entries(e.attrs || {}).filter(([, v]) => typeof v === "number")
+  const src = e.keyframe_url ? `${API_BASE}${e.keyframe_url}` : null
+  const [x1, y1, x2, y2] = e.bbox ?? [0, 0, 0, 0]
+  const when = formatSiteTime(e.ts, tz, { date: true, seconds: true })
+
+  return (
+    <figure className="w-56 shrink-0 overflow-hidden rounded-lg border bg-card">
+      {src && !failed ? (
+        <a href={src} target="_blank" rel="noreferrer" className="grid aspect-video place-items-center bg-muted">
+          {/* The wrapper takes the frame's own aspect ratio, so the box's percentages are
+              percentages of the picture actually shown. Cropping the frame to fill a 16:9 tile
+              would misplace the box on a 704x576 DVR frame and could crop the subject out. */}
+          <span
+            className="relative block max-h-full max-w-full"
+            style={ratio ? { aspectRatio: String(ratio), height: ratio < 16 / 9 ? "100%" : undefined, width: ratio >= 16 / 9 ? "100%" : undefined } : undefined}
+          >
+            <img
+              src={src}
+              alt={`${e.camera} at ${when}`}
+              loading="lazy"
+              onLoad={(ev) => {
+                const img = ev.currentTarget
+                if (img.naturalHeight) setRatio(img.naturalWidth / img.naturalHeight)
+              }}
+              onError={() => setFailed(true)}
+              className="block size-full object-contain"
+            />
+            {e.bbox && ratio && (
+              <span
+                className="pointer-events-none absolute rounded-sm border-2 border-primary shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"
+                style={{
+                  left: `${x1 * 100}%`,
+                  top: `${y1 * 100}%`,
+                  width: `${(x2 - x1) * 100}%`,
+                  height: `${(y2 - y1) * 100}%`,
+                }}
+              />
+            )}
+          </span>
+        </a>
+      ) : src && failed ? (
+        // A frame we hold but could not show — failed integrity check, or out of this
+        // deployment's scope — is not the same as no frame, and must not look like it.
+        <div className="grid aspect-video place-items-center bg-warn/10 px-2 text-center text-[10px] font-mono text-warn">
+          frame not available — could not be verified or served
+        </div>
+      ) : (
+        <div className="grid aspect-video place-items-center bg-[repeating-linear-gradient(45deg,var(--muted),var(--muted)_6px,transparent_6px,transparent_12px)] text-[10px] font-mono text-muted-foreground">
+          no frame held
+        </div>
+      )}
+      <figcaption className="space-y-0.5 p-2 text-[11px] leading-tight">
+        <div className="font-mono font-medium">{when}</div>
+        <div className="truncate text-muted-foreground" title={e.camera}>
+          {e.camera}
+        </div>
+        <div className="font-mono text-muted-foreground">
+          conf {e.confidence.toFixed(2)}
+          {attrs.map(([k, v]) => ` · ${k} ${v}`)}
+        </div>
+      </figcaption>
+    </figure>
   )
 }
 

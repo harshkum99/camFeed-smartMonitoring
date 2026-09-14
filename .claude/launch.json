@@ -6,6 +6,16 @@
       "runtimeExecutable": ".venv/bin/uvicorn",
       "runtimeArgs": ["smartcam.api.app:app", "--port", "8420", "--reload"],
       "port": 8420
+    },
+    {
+      "name": "smartcam-meva",
+      "runtimeExecutable": ".venv/bin/uvicorn",
+      "runtimeArgs": ["smartcam.api.app:app", "--port", "8421"],
+      "port": 8421,
+      "env": {
+        "SMARTCAM_TENANT": "185a034c-c756-5538-bbe7-166cc29e5b76",
+        "SMARTCAM_SITE": "c3acadbb-3366-5cd1-8ec0-a1eb3d4bc4c9"
+      }
     }
   ]
 }

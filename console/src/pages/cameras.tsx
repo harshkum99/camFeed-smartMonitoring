@@ -103,7 +103,9 @@ export function CamerasPage() {
                           )}
                         </TableCell>
                         <TableCell>
-                          {c.clock_ok ? (
+                          {c.clock_ok === null ? (
+                            <Pill tone="muted">not checked</Pill>
+                          ) : c.clock_ok ? (
                             <Pill tone="ok">ok</Pill>
                           ) : (
                             <Pill tone="critical">

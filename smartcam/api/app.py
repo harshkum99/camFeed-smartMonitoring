@@ -15,19 +15,23 @@ Two things this layer is genuinely responsible for:
 
 from __future__ import annotations
 
+import hashlib
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
+from smartcam.api import session as session_config
 from smartcam.api.session import Session, current_session
+from smartcam.evidence.store import data_dir, resolve_keyframe
 from smartcam.query.ask import ask
 from smartcam.query.nl import Catalog, GeminiProvider, ModelError, StubProvider
 from smartcam.rules.nl import StubRuleProvider, compile_rule, explain
@@ -90,6 +94,25 @@ def db():
         conn.close()
 
 
+def scoped(s: Session = Depends(current_session), conn=Depends(db)) -> Session:
+    """The session, after checking that its site belongs to its tenant.
+
+    Tenant and site arrive separately, and every query filters on one or both. Without this check
+    a mismatched pair reads one tenant's camera names and coverage next to another tenant's
+    tracks — each query individually scoped, the combination a leak.
+    """
+    try:
+        uuid.UUID(s.tenant_id), uuid.UUID(s.site_id)
+    except ValueError:
+        raise HTTPException(400, "tenant and site must be UUIDs") from None
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM sites WHERE site_id = %s AND tenant_id = %s",
+                    (s.site_id, s.tenant_id))
+        if cur.fetchone() is None:
+            raise HTTPException(403, "this site does not belong to this tenant")
+    return s
+
+
 # --- models --------------------------------------------------------------------------------
 
 class AskBody(BaseModel):
@@ -124,7 +147,7 @@ def health(conn=Depends(db)) -> dict[str, Any]:
 
 
 @app.get("/api/cameras")
-def cameras(s: Session = Depends(current_session), conn=Depends(db)) -> list[dict[str, Any]]:
+def cameras(s: Session = Depends(scoped), conn=Depends(db)) -> list[dict[str, Any]]:
     """The camera list, with each one's grade — what it can actually support.
 
     The grade is surfaced in the UI rather than hidden in a report, because it is the honest
@@ -133,7 +156,7 @@ def cameras(s: Session = Depends(current_session), conn=Depends(db)) -> list[dic
     with conn.cursor() as cur:
         cur.execute(
             "SELECT camera_id, name, grade::text, lens::text, detect_w, detect_h, detect_fps, "
-            "       gop_ms, clock_offset_ms "
+            "       gop_ms, clock_offset_ms, capabilities, grade_notes, graded_from "
             "FROM cameras WHERE site_id = %s AND enabled AND NOT excluded ORDER BY name",
             (s.site_id,),
         )
@@ -142,13 +165,39 @@ def cameras(s: Session = Depends(current_session), conn=Depends(db)) -> list[dic
         {"camera_id": str(c), "name": n, "grade": g, "lens": lens,
          "resolution": f"{w}x{h}" if w else None, "fps": fps, "gop_ms": gop,
          "clock_offset_ms": drift,
-         "clock_ok": drift is None or abs(drift) < 30_000}
-        for c, n, g, lens, w, h, fps, gop, drift in rows
+         # Unchecked is not the same as fine. A recording has no live clock to check.
+         "clock_ok": None if drift is None else abs(drift) < 30_000,
+         "capabilities": (caps or {}).get("classes", {}),
+         "grade_notes": list(notes or []), "graded_from": graded_from}
+        for c, n, g, lens, w, h, fps, gop, drift, caps, notes, graded_from in rows
     ]
 
 
+@app.get("/api/site")
+def site(s: Session = Depends(scoped), conn=Depends(db)) -> dict[str, Any]:
+    """The site being looked at: its timezone, whether it is replaying a recording, and the
+    attribution its footage requires. The console needs all three before it can print a time."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT name, tz, as_of, data_attribution, example_questions FROM sites "
+                    "WHERE site_id = %s", (s.site_id,))
+        row = cur.fetchone()
+    if row is None:
+        raise HTTPException(404, "no such site")
+    name, tz, as_of, attribution, examples = row
+    return {"site_id": s.site_id, "name": name, "tz": tz,
+            "as_of": as_of.isoformat() if as_of else None, "replay": as_of is not None,
+            "attribution": attribution, "examples": list(examples or [])}
+
+
+def _anchor(cur, site_id: str):
+    """End of the period the console shows: the recording's end for a replayed site, else now."""
+    cur.execute("SELECT COALESCE(as_of, now()) FROM sites WHERE site_id = %s", (site_id,))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 @app.get("/api/coverage")
-def coverage(hours: int = 24, s: Session = Depends(current_session),
+def coverage(hours: int = 24, s: Session = Depends(scoped),
              conn=Depends(db)) -> dict[str, Any]:
     """Recent camera coverage. Shown on the console's front page on purpose: an operator who
     cannot see that a camera has been dark since Tuesday will read every empty answer about it
@@ -160,20 +209,25 @@ def coverage(hours: int = 24, s: Session = Depends(current_session),
         cams = [str(r[0]) for r in cur.fetchall()]
         if not cams:
             return {"coverage_pct": 0.0, "gaps": [], "cameras": 0}
+        end = _anchor(cur, s.site_id)
         cur.execute(
-            "SELECT coverage_pct(%s::uuid[], now() - make_interval(hours => %s), now())",
-            (cams, hours))
+            "SELECT coverage_pct(%s::uuid[], %s - make_interval(hours => %s), %s)",
+            (cams, end, hours, end))
         pct = float(cur.fetchone()[0] or 0.0)
         cur.execute(
-            "SELECT camera_name, gap_start, gap_end FROM coverage_gaps("
-            "%s::uuid[], now() - make_interval(hours => %s), now())", (cams, hours))
+            "SELECT g.camera_name, g.gap_start, g.gap_end, EXISTS (SELECT 1 FROM camera_uptime u "
+            "  WHERE u.camera_id = g.camera_id AND u.source = 'recorded_import') "
+            "FROM coverage_gaps(%s::uuid[], %s - make_interval(hours => %s), %s) g",
+            (cams, end, hours, end))
         gaps = [{"camera": n, "from": a.isoformat(), "to": b.isoformat(),
-                 "minutes": int((b - a).total_seconds() // 60)} for n, a, b in cur.fetchall()]
-    return {"coverage_pct": pct, "gaps": gaps, "cameras": len(cams), "hours": hours}
+                 "minutes": int((b - a).total_seconds() // 60), "recorded": rec}
+                for n, a, b, rec in cur.fetchall()]
+    return {"coverage_pct": pct, "gaps": gaps, "cameras": len(cams), "hours": hours,
+            "as_of": end.isoformat() if end else None}
 
 
 @app.get("/api/activity")
-def activity(hours: int = 48, s: Session = Depends(current_session),
+def activity(hours: int = 48, s: Session = Depends(scoped),
              conn=Depends(db)) -> list[dict[str, Any]]:
     """Hourly event volume across the site.
 
@@ -181,6 +235,7 @@ def activity(hours: int = 48, s: Session = Depends(current_session),
     all visible, so an operator spots an abnormal night at a glance. A flat or missing band is
     itself the finding: it usually means a camera stopped, not that nothing happened.
     """
+    span = min(max(hours, 1), 24 * 14)
     with conn.cursor() as cur:
         cur.execute(
             "SELECT date_trunc('hour', ts) AS h, count(*) "
@@ -188,15 +243,25 @@ def activity(hours: int = 48, s: Session = Depends(current_session),
             "  AND ts >= (SELECT max(ts) FROM zone_events WHERE site_id = %s) "
             "          - make_interval(hours => %s) "
             "GROUP BY h ORDER BY h",
-            (s.site_id, s.site_id, min(max(hours, 1), 24 * 14)),
+            (s.site_id, s.site_id, span),
         )
-        return [{"hour": h.isoformat(), "events": n} for h, n in cur.fetchall()]
+        rows = cur.fetchall()
+        if not rows:
+            # A site with no zones drawn has no zone events; its activity is its tracks.
+            cur.execute(
+                "SELECT date_trunc('hour', ts_start) AS h, count(*) FROM tracks "
+                "WHERE tenant_id = %s AND site_id = %s AND ts_start >= "
+                "  (SELECT max(ts_start) FROM tracks WHERE tenant_id = %s AND site_id = %s) "
+                "  - make_interval(hours => %s) GROUP BY h ORDER BY h",
+                (s.tenant_id, s.site_id, s.tenant_id, s.site_id, span))
+            rows = cur.fetchall()
+        return [{"hour": h.isoformat(), "events": n} for h, n in rows]
 
 
 # --- ask ------------------------------------------------------------------------------------
 
 @app.post("/api/ask")
-def ask_question(body: AskBody, s: Session = Depends(current_session),
+def ask_question(body: AskBody, s: Session = Depends(scoped),
                  conn=Depends(db)) -> dict[str, Any]:
     """Answer a question, or explain honestly why we cannot.
 
@@ -222,21 +287,66 @@ def ask_question(body: AskBody, s: Session = Depends(current_session),
         "ambiguous": a.ambiguous if a else 0,
         "total": a.total if a else 0,
         "coverage_pct": a.coverage_pct if a else 0.0,
-        "gaps": [{"camera": g.camera_name, "minutes": g.minutes} for g in (a.gaps if a else [])],
+        "gaps": [{"camera": g.camera_name, "minutes": g.minutes, "seconds": g.seconds,
+                  "recorded": g.recorded} for g in (a.gaps if a else [])],
+        "limits": [{"camera": lim.camera_name, "class": lim.cls, "status": lim.status,
+                    "frame_recall": lim.frame_recall, "message": lim.phrase()}
+                   for lim in (a.limits if a else [])],
+        "notes": a.notes if a else [],
         "unresolved": r.compiled.unresolved if r.compiled else [],
+        "as_of": catalog.as_of.isoformat() if catalog.as_of else None,
+        "site_tz": catalog.tz,
         "evidence": [
             {"track_id": e.track_id, "camera": e.camera_name, "ts": e.ts.isoformat(),
-             "confidence": e.confidence, "keyframe_uri": e.keyframe_uri, "attrs": e.attrs}
+             "track_start": e.track_start.isoformat() if e.track_start else None,
+             "confidence": e.confidence, "attrs": e.attrs, "bbox": e.bbox,
+             "frame_sha256": e.frame_sha256,
+             # A URL we serve, never the stored path: storage layout is not the client's business,
+             # and the seed data's placeholder URIs point at nothing.
+             "keyframe_url": (f"/api/evidence/{e.track_id}/keyframe"
+                              if (e.keyframe_uri or "").startswith("keyframes/") else None)}
             for e in (a.evidence if a else [])
         ],
         "latency_ms": r.latency_ms,
     }
 
 
+@app.get("/api/evidence/{track_id}/keyframe")
+def keyframe(track_id: uuid.UUID, conn=Depends(db)) -> Response:
+    """The evidence frame for one track, if it belongs to this deployment's site.
+
+    Scope here comes from server configuration only, never from the x-smartcam-* headers. Those
+    headers let the console and tests act as different people and are explicitly not a security
+    boundary; on every other route that means metadata, but here it would mean handing any
+    caller real footage of another tenant's premises for the price of a guessed header. An <img>
+    tag cannot send headers anyway.
+
+    The bytes are read once, hashed, and those same bytes are served — checking a file and then
+    streaming it from a second open would certify one file and send another.
+    """
+    tenant, site_id = session_config.DEFAULT_TENANT, session_config.DEFAULT_SITE
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT best_keyframe_uri, frame_sha256 FROM tracks "
+            "WHERE track_id = %s AND tenant_id = %s AND site_id = %s LIMIT 1",
+            (str(track_id), tenant, site_id))
+        row = cur.fetchone()
+    path = resolve_keyframe(data_dir(), row[0], tenant_id=tenant, site_id=site_id) if row else None
+    if path is None:
+        raise HTTPException(404, "no evidence frame is held for this track")
+    data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != row[1]:
+        raise HTTPException(422, "evidence frame failed its integrity check and was not served")
+    return Response(content=data, media_type="image/jpeg", headers={
+        "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff",
+        "X-Keyframe-SHA256": digest})
+
+
 # --- zones ------------------------------------------------------------------------------------
 
 @app.get("/api/cameras/{camera_id}/zones")
-def get_zones(camera_id: str, s: Session = Depends(current_session),
+def get_zones(camera_id: str, s: Session = Depends(scoped),
               conn=Depends(db)) -> list[dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(
@@ -248,7 +358,7 @@ def get_zones(camera_id: str, s: Session = Depends(current_session),
 
 @app.put("/api/cameras/{camera_id}/zones")
 def put_zones(camera_id: str, zones: list[ZoneBody],
-              s: Session = Depends(current_session), conn=Depends(db)) -> dict[str, Any]:
+              s: Session = Depends(scoped), conn=Depends(db)) -> dict[str, Any]:
     """Replace a camera's zones. Coordinates are normalised 0-1 and validated here, because a
     zone stored in pixels silently moves the moment a camera's resolution changes."""
     s.require("admin")
@@ -282,7 +392,7 @@ def put_zones(camera_id: str, zones: list[ZoneBody],
 # --- rules ---------------------------------------------------------------------------------
 
 @app.post("/api/rules/draft")
-def draft_rule(body: RuleDraftBody, s: Session = Depends(current_session),
+def draft_rule(body: RuleDraftBody, s: Session = Depends(scoped),
                conn=Depends(db)) -> dict[str, Any]:
     """Compile an instruction into a rule and hand back the English read-back — WITHOUT saving.
 
@@ -312,7 +422,7 @@ def draft_rule(body: RuleDraftBody, s: Session = Depends(current_session),
 
 
 @app.post("/api/rules")
-def save_rule(payload: dict[str, Any], s: Session = Depends(current_session),
+def save_rule(payload: dict[str, Any], s: Session = Depends(scoped),
               conn=Depends(db)) -> dict[str, Any]:
     s.require("admin")
     try:
@@ -332,7 +442,7 @@ def save_rule(payload: dict[str, Any], s: Session = Depends(current_session),
 
 
 @app.get("/api/rules")
-def list_rules(s: Session = Depends(current_session), conn=Depends(db)) -> list[dict[str, Any]]:
+def list_rules(s: Session = Depends(scoped), conn=Depends(db)) -> list[dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT rule_id, name, severity, enabled, doc, true_positives, false_positives "
@@ -353,7 +463,7 @@ def list_rules(s: Session = Depends(current_session), conn=Depends(db)) -> list[
 
 
 @app.delete("/api/rules/{rule_id}")
-def disable_rule(rule_id: str, s: Session = Depends(current_session),
+def disable_rule(rule_id: str, s: Session = Depends(scoped),
                  conn=Depends(db)) -> dict[str, Any]:
     """Disable rather than delete. A rule that fired is part of the record of why an alert
     happened, and deleting it orphans every alert it raised."""
@@ -370,7 +480,7 @@ def disable_rule(rule_id: str, s: Session = Depends(current_session),
 # --- alerts -----------------------------------------------------------------------------------
 
 @app.get("/api/alerts")
-def list_alerts(limit: int = 50, s: Session = Depends(current_session),
+def list_alerts(limit: int = 50, s: Session = Depends(scoped),
                 conn=Depends(db)) -> list[dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(
@@ -392,7 +502,7 @@ def list_alerts(limit: int = 50, s: Session = Depends(current_session),
 
 @app.post("/api/alerts/{alert_id}/feedback")
 def alert_feedback(alert_id: str, body: FeedbackBody,
-                   s: Session = Depends(current_session), conn=Depends(db)) -> dict[str, Any]:
+                   s: Session = Depends(scoped), conn=Depends(db)) -> dict[str, Any]:
     """The one-tap 'not an incident' button.
 
     This is the most valuable button in the product. It is the only per-site labelled data we
@@ -431,7 +541,7 @@ def alert_feedback(alert_id: str, body: FeedbackBody,
 # --- audit --------------------------------------------------------------------------------
 
 @app.get("/api/audit")
-def audit(limit: int = 50, s: Session = Depends(current_session),
+def audit(limit: int = 50, s: Session = Depends(scoped),
           conn=Depends(db)) -> list[dict[str, Any]]:
     """Every question asked of this site, including the refused ones.
 

@@ -19,10 +19,16 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.8"]
 survey = ["onvif-zeep-async>=3.1", "av>=13"]
+# Array code used by ingest and its tests. Kept apart from onnxruntime so CI can test every ingest
+# module with fake detectors without installing the inference runtime.
+analysis = ["numpy>=2.0", "scipy>=1.13", "pillow>=11"]
+# Running real detection on recorded footage. The API and console never need this.
+ingest = ["smartcam[analysis]", "onnxruntime>=1.20"]
 
 [project.scripts]
 smartcam-survey = "smartcam.survey.cli:main"
 smartcam-import = "smartcam.ingest.cli:main"
+smartcam-ingest = "smartcam.ingest.ingest_cli:main"
 
 [build-system]
 requires = ["hatchling"]

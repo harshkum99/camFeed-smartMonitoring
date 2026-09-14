@@ -23,7 +23,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,analysis]"
 
       - name: Licence gate
         # Runs before the tests, deliberately. An AGPL or non-commercial dependency is a
@@ -36,6 +36,23 @@ jobs:
 
       - name: Tests
         run: pytest -q
+
+  licence-extras:
+    # The gate can only judge what is installed, and the test job deliberately installs neither the
+    # survey tooling nor the inference runtime. Without this job, a non-commercial transitive
+    # dependency of onnxruntime would ship without ever being looked at.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install every optional group
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,survey,ingest]"
+      - name: Licence gate over the full dependency tree
+        run: python scripts/license_gate.py
 
   schema:
     runs-on: ubuntu-latest

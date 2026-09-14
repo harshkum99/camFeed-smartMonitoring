@@ -55,8 +55,11 @@ def ask(
     operator may not see cannot reach it.
     """
     t0 = time.monotonic()
-    now = now or datetime.now(UTC)
     catalog = catalog if catalog is not None else Catalog.load(conn, site_id)
+    # A recorded site is answered as of its latest analysed footage. "This morning" asked about a
+    # 2018 recording means that morning; anchored to the wall clock it would mean a day we hold
+    # no footage for, and every answer would be a coverage refusal.
+    now = now or catalog.as_of or datetime.now(UTC)
 
     try:
         compiled = compile_question(question, catalog, provider, now=now)

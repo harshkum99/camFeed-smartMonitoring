@@ -1,0 +1,35 @@
+# Third-party artefacts that are not Python packages: model weights, independently implemented
+# algorithms, and datasets. scripts/license_gate.py checks this file in CI; the ingest model loader
+# refuses any weights file whose sha256 is not listed here. Swapping a checkpoint is therefore a
+# reviewed change to this file, never a file silently copied into a directory.
+
+[[model]]
+name = "dfine-s-coco"
+file = "dfine_s_coco/model.onnx"          # resolved under $SMARTCAM_MODEL_DIR (default var/models)
+sha256 = "cd8a49a945feda6d28c6304ae8ae85c2759ba1d78a5a83a22c5ce8db82ef7238"
+size_bytes = 41535197
+source_url = "https://huggingface.co/onnx-community/dfine_s_coco-ONNX/resolve/a3cf03147a9b86c78475139115c8ac142577352d/onnx/model.onnx"
+licence = "Apache-2.0"
+licence_evidence = [
+  "huggingface.co/ustc-community/dfine-small-coco @ f79e65b5fbb33ceb9d3ebba042955d7410c608f8: model card licence apache-2.0",
+  "github.com/Peterande/D-FINE LICENSE: Apache License 2.0",
+]
+provenance_note = "The onnx-community ONNX card declares no licence; it is a format conversion of the Apache-2.0 D-FINE-S COCO weights (card base_model points at the ustc-community checkpoint)."
+training_data = "COCO 2017"
+benchmark = "docs/research/detector-tracker-benchmark.md"
+reviewed_on = 2026-09-14
+
+[[algorithm]]
+name = "bytetrack"
+path = "smartcam/ingest/track.py"
+reference = "Zhang et al., ByteTrack, arXiv:2110.06864; github.com/ifzhang/ByteTrack (MIT)"
+licence = "MIT"
+relationship = "independent implementation of the published association scheme; no code copied"
+header_must_contain = ["arXiv:2110.06864", "No code was taken from"]
+
+[[dataset]]
+name = "MEVA"
+licence = "CC-BY-4.0"
+use = "demo footage and ground-truth evaluation"
+source_url = "https://mevadata.org"
+attribution = '"Multiview Extended Video with Activities" (MEVA) dataset by Kitware Inc. and the Intelligence Advanced Research Projects Activity (IARPA), licensed under CC BY 4.0.'
