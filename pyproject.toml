@@ -14,6 +14,9 @@ dependencies = [
     "httpx>=0.28",
     "python-dotenv>=1.0",
     "structlog>=24.4",
+    # Evidence bundles: the API renders the draft section 63 certificate. Both BSD/HPND.
+    "reportlab>=4.2",
+    "pillow>=11",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +32,7 @@ ingest = ["smartcam[analysis]", "onnxruntime>=1.20"]
 smartcam-survey = "smartcam.survey.cli:main"
 smartcam-import = "smartcam.ingest.cli:main"
 smartcam-ingest = "smartcam.ingest.ingest_cli:main"
+smartcam-evidence = "smartcam.evidence.cli:main"
 
 [build-system]
 requires = ["hatchling"]

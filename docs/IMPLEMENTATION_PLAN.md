@@ -148,8 +148,9 @@ Five minutes, in this order. Every question is answered from the index, never fr
    answered as a count triple with coverage %.
 4. **The honest no.** *"Was there a fire in the server room last Tuesday?"* → *"No camera covers the server
    room. Coverage 0% for that period."* Regulated buyers trust a system that refuses.
-5. **The certificate.** Select the incident, click once, hand them a printed court-filable
-   Bharatiya Sakshya Adhiniyam s.63 certificate. **Nobody else in the world does this.**
+5. **The certificate.** Select the incident, click once, and hand them a pre-filled draft of the
+   Bharatiya Sakshya Adhiniyam s.63 certificate with its hash report — then have their own IT person
+   check the bundle with `shasum` on the spot. Never call it admissible; that is the court's call.
 6. **The counter.** *"Raw bytes seen: 4.1 TB. Bytes Smart Cam Monitoring kept: 38 GB. Your DVR's oldest frame: 23 days
    ago. Smart Cam Monitoring's oldest frame: day one."*
 

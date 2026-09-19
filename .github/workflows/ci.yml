@@ -18,7 +18,9 @@ jobs:
       - name: Install ffmpeg
         # The survey probes real streams through ffprobe, and the GOP measurement is verified
         # against encoded video rather than mocks.
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        # poppler-utils: the certificate tests read the rendered PDF back as text, so a missing
+        # statutory line or an admissibility claim fails the build instead of being skipped.
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg poppler-utils
 
       - name: Install
         run: |

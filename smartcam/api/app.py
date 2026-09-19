@@ -23,14 +23,15 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Response
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from smartcam.api import session as session_config
 from smartcam.api.session import Session, current_session
+from smartcam.evidence import service as evidence
 from smartcam.evidence.store import data_dir, resolve_keyframe
 from smartcam.query.ask import ask
 from smartcam.query.nl import Catalog, GeminiProvider, ModelError, StubProvider
@@ -86,8 +87,15 @@ if _origins:
 
 def db():
     """One short-lived connection per request. A pool belongs here eventually; at PoC scale it
-    would be optimising something that is not slow."""
-    conn = psycopg.connect(DSN)
+    would be optimising something that is not slow.
+
+    Autocommit, so that every `conn.transaction()` below is a real transaction. Without it the
+    first SELECT opens an implicit transaction, every later block becomes a savepoint inside it,
+    and closing the connection rolls all of it back — which is how evidence bundles and their
+    custody entries were once "created" and silently discarded. Handlers that write more than one
+    row wrap them in `conn.transaction()` explicitly.
+    """
+    conn = psycopg.connect(DSN, autocommit=True)
     try:
         yield conn
     finally:
@@ -129,6 +137,12 @@ class ZoneBody(BaseModel):
     #: Normalised 0-1 points, so a zone survives a resolution change on the camera.
     polygon: list[list[float]]
     direction: str | None = None
+
+
+class BundleBody(BaseModel):
+    track_ids: list[str] = Field(min_length=1, max_length=50)
+    purpose: str = Field(min_length=3, max_length=300)
+    question: str | None = Field(default=None, max_length=500)
 
 
 class FeedbackBody(BaseModel):
@@ -343,6 +357,141 @@ def keyframe(track_id: uuid.UUID, conn=Depends(db)) -> Response:
         "X-Keyframe-SHA256": digest})
 
 
+# --- evidence bundles --------------------------------------------------------------------------
+#
+# Scope for every route here comes from server configuration, never the x-smartcam-* headers, for
+# the same reason as the keyframe route: these return real footage. The actor header is only a
+# label recorded in the custody log — there is no authentication yet, and the certificate says so
+# by leaving every signature and name for a person to fill in.
+
+def deployment_scope(x_smartcam_actor: str | None = Header(default=None)) -> Session:
+    return Session(tenant_id=session_config.DEFAULT_TENANT, site_id=session_config.DEFAULT_SITE,
+                   actor=(x_smartcam_actor or "console")[:120])
+
+
+def _bundle_summary(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "bundle_id": str(row["bundle_id"]), "created_at": row["created_at"].isoformat(),
+        "requested_by": row["requested_by"], "purpose": row["purpose"],
+        "question": row.get("question"),
+        "window": {"from": row["window_start"].isoformat(), "to": row["window_end"].isoformat()},
+        "cameras": len(row["cameras"] or []), "frames": row["frame_count"],
+        "tracks": len(row.get("track_ids") or []),
+        "sources": [{"file": s.get("file_name"), "sha256": s.get("sha256_at_import"),
+                     "included": s.get("included", False)} for s in row.get("source_files") or []],
+        "merkle_root": row["merkle_root"], "manifest_sha256": row.get("manifest_sha256"),
+        "archive_sha256": row.get("archive_sha256"),
+        "certificate": bool(row.get("certificate_sha256")),
+        "clock_warnings": [w.get("message") for w in row.get("clock_warnings") or []],
+    }
+
+
+@app.post("/api/evidence/bundles")
+def create_evidence_bundle(body: BundleBody, s: Session = Depends(deployment_scope),
+                           conn=Depends(db)) -> dict[str, Any]:
+    """Prepare an evidence bundle from selected tracks: original recordings, derived frames,
+    index records, hashes, a Merkle root, and a certificate draft for people to sign."""
+    try:
+        built = evidence.create_bundle(conn, evidence.BundleRequest(
+            tenant_id=s.tenant_id, site_id=s.site_id, requested_by=s.actor,
+            purpose=body.purpose.strip(), track_ids=body.track_ids, question=body.question),
+            data_dir=data_dir())
+    except evidence.BundleRefused as e:
+        raise HTTPException(409, str(e)) from e
+    stored = evidence.load_bundle(conn, built.bundle_id, tenant_id=s.tenant_id,
+                                  site_id=s.site_id, data_dir=data_dir())
+    assert stored is not None
+    return {**_bundle_summary(stored.row), "warnings": built.warnings}
+
+
+@app.get("/api/evidence/bundles")
+def list_evidence_bundles(s: Session = Depends(deployment_scope),
+                          conn=Depends(db)) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM evidence_bundles WHERE tenant_id = %s AND site_id = %s "
+                    "ORDER BY created_at DESC LIMIT 100", (s.tenant_id, s.site_id))
+        cols = [d.name for d in cur.description]
+        rows = [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+    return [_bundle_summary(r) for r in rows]
+
+
+def _stored_or_404(conn, bundle_id: uuid.UUID, s: Session) -> evidence.StoredBundle:
+    stored = evidence.load_bundle(conn, str(bundle_id), tenant_id=s.tenant_id,
+                                  site_id=s.site_id, data_dir=data_dir())
+    if stored is None:
+        raise HTTPException(404, "no such evidence bundle at this site")
+    return stored
+
+
+@app.get("/api/evidence/bundles/{bundle_id}")
+def get_evidence_bundle(bundle_id: uuid.UUID, s: Session = Depends(deployment_scope),
+                        conn=Depends(db)) -> dict[str, Any]:
+    stored = _stored_or_404(conn, bundle_id, s)
+    return {**_bundle_summary(stored.row),
+            "custody": evidence.custody(conn, str(bundle_id))}
+
+
+@app.get("/api/evidence/bundles/{bundle_id}/archive")
+def download_evidence_bundle(bundle_id: uuid.UUID, s: Session = Depends(deployment_scope),
+                             conn=Depends(db)) -> StreamingResponse:
+    """The archive, only if it is still byte-for-byte the one sealed at creation — hashed and
+    streamed from one open handle. Every download is a custody entry: a bundle that leaves the
+    system without one breaks the chain."""
+    stored = _stored_or_404(conn, bundle_id, s)
+    try:
+        handle = evidence.open_verified(stored)
+    except evidence.BundleUnavailable as e:
+        evidence.log_custody(conn, str(bundle_id), s.actor, "export_refused", {"reason": str(e)})
+        raise HTTPException(422, str(e)) from e
+    evidence.log_custody(conn, str(bundle_id), s.actor, "exported",
+                         {"archive_sha256": stored.row["archive_sha256"]})
+
+    def stream():
+        with handle:
+            while block := handle.read(1 << 20):
+                yield block
+
+    return StreamingResponse(stream(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="evidence-{bundle_id}.zip"',
+        "X-Archive-SHA256": stored.row["archive_sha256"], "Cache-Control": "no-store"})
+
+
+@app.get("/api/evidence/bundles/{bundle_id}/certificate")
+def evidence_certificate(bundle_id: uuid.UUID, s: Session = Depends(deployment_scope),
+                         conn=Depends(db)) -> Response:
+    """The draft sealed inside the bundle (D1), read from the verified archive handle."""
+    stored = _stored_or_404(conn, bundle_id, s)
+    if not stored.row.get("certificate_sha256"):
+        raise HTTPException(404, "this bundle was prepared without a certificate draft")
+    try:
+        with evidence.open_verified(stored) as handle:
+            pdf = evidence.read_member(handle, "certificate/certificate-draft.pdf")
+    except evidence.BundleUnavailable as e:
+        raise HTTPException(422, str(e)) from e
+    if pdf is None or hashlib.sha256(pdf).hexdigest() != stored.row["certificate_sha256"]:
+        raise HTTPException(422, "certificate draft failed its integrity check")
+    evidence.log_custody(conn, str(bundle_id), s.actor, "viewed", {"item": "certificate draft D1"})
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="certificate-D1-{bundle_id}.pdf"',
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+
+@app.post("/api/evidence/bundles/{bundle_id}/drafts")
+def new_certificate_draft(bundle_id: uuid.UUID, s: Session = Depends(deployment_scope),
+                          conn=Depends(db)) -> Response:
+    """A fresh draft for a new submission — numbered, timed and logged. A POST, not a GET: issuing
+    a draft uses up a number and writes to the custody log, and a reload, a link preview or a
+    PDF viewer re-fetching the URL must never do that."""
+    stored = _stored_or_404(conn, bundle_id, s)
+    try:
+        pdf, draft_id = evidence.fresh_draft(conn, stored, s.actor)
+    except evidence.BundleUnavailable as e:
+        raise HTTPException(422, str(e)) from e
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="certificate-{draft_id}-{bundle_id}.pdf"',
+        "X-Draft-Id": draft_id, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+
 # --- zones ------------------------------------------------------------------------------------
 
 @app.get("/api/cameras/{camera_id}/zones")
@@ -373,7 +522,7 @@ def put_zones(camera_id: str, zones: list[ZoneBody],
                     400, f"zone '{z.name}' has a point outside the frame. Coordinates are "
                          f"normalised 0-1 so zones survive a resolution change.")
 
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute("SELECT 1 FROM cameras WHERE camera_id = %s AND site_id = %s",
                     (camera_id, s.site_id))
         if cur.fetchone() is None:
@@ -510,7 +659,7 @@ def alert_feedback(alert_id: str, body: FeedbackBody,
     the whole application.
     """
     verdict = "true_positive" if body.actioned else "false_positive"
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "UPDATE alerts SET operator_feedback = %s, feedback_by = %s, feedback_at = now(), "
             "state = %s WHERE alert_id = %s AND site_id = %s RETURNING rule_id",

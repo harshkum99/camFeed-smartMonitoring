@@ -237,6 +237,41 @@ BEGIN
   RAISE NOTICE 'G11 ok - overlapping uptime is merged before coverage is computed';
 END $$;
 
+-- G12 -- an evidence bundle, once written, cannot be edited or deleted, and cannot be filed
+-- under a site that belongs to another tenant.
+DO $$
+DECLARE b UUID := gen_random_uuid();
+BEGIN
+  INSERT INTO evidence_bundles (bundle_id, tenant_id, site_id, requested_by, window_start,
+                                window_end, cameras, frame_count, merkle_root, manifest_sha256,
+                                archive_sha256)
+  VALUES (b, '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001',
+          'guard', '2026-09-02 10:00+00', '2026-09-02 11:00+00', '{}', 0, repeat('a', 64),
+          repeat('b', 64), repeat('c', 64));
+  BEGIN
+    UPDATE evidence_bundles SET purpose = 'edited' WHERE bundle_id = b;
+    RAISE EXCEPTION 'G12 FAILED: an evidence bundle was edited';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE 'G12 FAILED%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    DELETE FROM evidence_bundles WHERE bundle_id = b;
+    RAISE EXCEPTION 'G12 FAILED: an evidence bundle was deleted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE 'G12 FAILED%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    INSERT INTO evidence_bundles (tenant_id, site_id, requested_by, window_start, window_end,
+                                  cameras, frame_count, merkle_root)
+    VALUES (gen_random_uuid(), 'aaaaaaaa-0000-0000-0000-000000000001', 'guard',
+            '2026-09-02 10:00+00', '2026-09-02 11:00+00', '{}', 0, repeat('a', 64));
+    RAISE EXCEPTION 'G12 FAILED: a bundle was filed under a foreign tenant';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE 'G12 FAILED%' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'G12 ok - evidence bundles are immutable and scoped to their own tenant';
+END $$;
+
 ROLLBACK;
 
 \echo 'all guard-rail assertions passed'

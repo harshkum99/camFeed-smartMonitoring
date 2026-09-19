@@ -101,6 +101,26 @@ only ever read.
 Any screen or slide showing MEVA footage must carry its attribution, which the console prints in
 its footer. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+## Evidence bundles and the section 63 certificate draft
+
+From any answer with evidence frames, the console's **Prepare evidence bundle** (or the CLI) packs
+the original recordings behind it — each re-verified against the SHA-256 taken when it was imported
+— with the frames, index records, a hash report, a Merkle root, and a pre-filled draft of the
+Bharatiya Sakshya Adhiniyam 2023 section 63(4) Schedule certificate for the person in charge of the
+recorder and an expert to review and sign. The product never signs and never claims admissibility.
+
+```bash
+smartcam-evidence create --site meva --purpose "Complaint 42, stairwell" \
+  --question "How many people were at Admin G329 between 11:55 and 12:00 today?"
+smartcam-evidence verify var/smartcam/bundles/<tenant>/<site>/<bundle>.zip --dsn dbname=smartcam_dev
+```
+
+Original recordings are looked up under `SMARTCAM_FOOTAGE_DIR` (default `var/footage`). A bundle
+can be checked without any of this software: `shasum -a 256 -c SHA256SUMS` and
+`python3 verify_bundle.py .` inside the extracted folder. See
+[docs/research/bsa-s63-certificate.md](docs/research/bsa-s63-certificate.md) for what the law asks
+for and what the generator may and may not fill in.
+
 ## Tests
 
 ```bash

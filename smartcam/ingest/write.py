@@ -22,11 +22,12 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from psycopg.types.json import Jsonb
 
 from smartcam.ingest.meva import SiteProfile
+from smartcam.version import software_version
 
 
 class ImportRefused(RuntimeError):
@@ -81,6 +82,8 @@ class ClipRow:
     source_uri: str
     source_sha256: str
     uptime_detail: str
+    #: When the source file's SHA-256 was computed by this import.
+    source_hashed_at: datetime | None = None
 
 
 def track_id(site_id: str, camera_key: str, source_sha256: str, fingerprint: str,
@@ -191,16 +194,24 @@ def write_clip(conn, p: SiteProfile, clip: ClipRow, tracks: list[TrackRow]) -> N
         lo = clip.file_start - timedelta(seconds=5)
         hi = clip.file_end + timedelta(seconds=5)
         cur.execute(
-            "SELECT clip_id, source_sha256 FROM clips WHERE tenant_id = %s AND site_id = %s "
-            "AND camera_id = %s AND ts_start < %s AND ts_end > %s",
-            (p.tenant_id, p.site_id, clip.camera_id, hi, lo))
+            "SELECT clip_id, source_sha256, ts_start, ts_end, imported_at FROM clips "
+            "WHERE tenant_id = %s AND site_id = %s AND camera_id = %s AND ts_start < %s "
+            "AND ts_end > %s", (p.tenant_id, p.site_id, clip.camera_id, hi, lo))
         prior = cur.fetchall()
-        uris = [uri] + [clip_uri(sha) for _, sha in prior if sha]
+        uris = [uri] + [clip_uri(sha) for _, sha, *_ in prior if sha]
+        # Every track of every replaced import goes, wherever in its recording it fell. Bounding
+        # the delete by this file's span alone left the tail of a longer earlier import behind,
+        # citing a recording row that no longer existed.
+        span_lo = min([lo, *(s_ - timedelta(seconds=5) for _, _, s_, _, _ in prior)])
+        span_hi = max([hi, *(e_ + timedelta(seconds=5) for _, _, _, e_, _ in prior)])
         cur.execute(
             "DELETE FROM tracks WHERE tenant_id = %s AND site_id = %s AND camera_id = %s "
             "AND ts_start >= %s AND ts_start < %s AND clip_uri = ANY(%s)",
-            (p.tenant_id, p.site_id, clip.camera_id, lo, hi, uris))
-        clip_ids = [clip.clip_id] + [str(c) for c, _ in prior]
+            (p.tenant_id, p.site_id, clip.camera_id, span_lo, span_hi, uris))
+        # Re-importing the same bytes does not make them newly received: keep the first hash time.
+        first_hashed = min([t for _, sha, _, _, t in prior if sha == clip.source_sha256 and t]
+                           + [clip.source_hashed_at or datetime.now(UTC)])
+        clip_ids = [clip.clip_id] + [str(c) for c, *_ in prior]
         cur.execute("DELETE FROM clips WHERE clip_id = ANY(%s::uuid[])", (clip_ids,))
         cur.execute(
             "DELETE FROM camera_uptime WHERE camera_id = %s AND source = 'recorded_import' "
@@ -222,11 +233,12 @@ def write_clip(conn, p: SiteProfile, clip: ClipRow, tracks: list[TrackRow]) -> N
 
         cur.execute(
             "INSERT INTO clips (clip_id, tenant_id, site_id, camera_id, ts_start, ts_end, "
-            "keyframe_uris, frame_sha256, retained_reason, source_uri, source_sha256) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'backfill',%s,%s)",
+            "keyframe_uris, frame_sha256, retained_reason, source_uri, source_sha256, "
+            "imported_at, imported_by) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'backfill',%s,%s,%s,%s)",
             (clip.clip_id, p.tenant_id, p.site_id, clip.camera_id, clip.ts_start,
              clip.analysed_end, clip.keyframe_uris, clip.frame_sha256, clip.source_uri,
-             clip.source_sha256))
+             clip.source_sha256, first_hashed, software_version()))
 
         # Uptime means footage we analysed, so it ends where analysis ended. A supervisor row
         # starting at the same instant is left alone; the recorded row yields instead.

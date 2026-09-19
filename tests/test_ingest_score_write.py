@@ -405,3 +405,33 @@ def test_clip_whose_uptime_cannot_be_written_writes_nothing(db):
     db.rollback()
     assert _one(db, "SELECT count(*) FROM tracks WHERE clip_uri = %s", clip_uri(sha)) == 0
     assert _one(db, "SELECT count(*) FROM clips WHERE source_sha256 = %s", sha) == 0
+
+
+def test_reimporting_a_shorter_file_removes_every_track_of_the_longer_one(db):
+    """An hour-long import replaced by a ten-minute re-export used to keep the tracks from the
+    rest of the hour, citing a recording row that no longer existed."""
+    old, new = "7" * 64, "8" * 64
+    start = _t(18, 0)
+    long_clip = dataclasses.replace(_clip(old, start, _t(19, 0)),
+                                    file_end=start + timedelta(hours=1))
+    write_clip(db, meva_profile(), long_clip,
+               [_track(old, 1, start), _track(old, 2, start + timedelta(minutes=30))])
+    write_clip(db, meva_profile(), _clip(new, start, _t(18, 10)), [_track(new, 1, start)])
+    assert _one(db, "SELECT count(*) FROM tracks WHERE clip_uri = %s", clip_uri(old)) == 0
+    assert _one(db, "SELECT count(*) FROM tracks WHERE clip_uri = %s", clip_uri(new)) == 1
+
+
+def test_hash_time_is_when_the_file_was_hashed_and_survives_reimport(db):
+    """The hash report states when the hash was taken. That is not when a row was written, and
+    re-importing the same bytes does not make them newly received."""
+    sha = "9" * 64
+    start = _t(18, 30)
+    hashed = datetime(2026, 9, 1, 4, 0, tzinfo=UTC)
+    write_clip(db, meva_profile(),
+               dataclasses.replace(_clip(sha, start, _t(18, 35)), source_hashed_at=hashed),
+               [_track(sha, 1, start)])
+    later = datetime(2026, 9, 5, 4, 0, tzinfo=UTC)
+    write_clip(db, meva_profile(),
+               dataclasses.replace(_clip(sha, start, _t(18, 35)), source_hashed_at=later),
+               [_track(sha, 1, start)])
+    assert _one(db, "SELECT imported_at FROM clips WHERE source_sha256 = %s", sha) == hashed

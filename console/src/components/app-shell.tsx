@@ -3,6 +3,7 @@ import {
   Activity,
   BellRing,
   Camera,
+  FileCheck2,
   LayoutDashboard,
   ScrollText,
   Search,
@@ -20,6 +21,7 @@ const NAV = [
   { to: "/rules", label: "Rules", icon: ShieldCheck },
   { to: "/zones", label: "Zones", icon: Shapes },
   { to: "/cameras", label: "Cameras", icon: Camera },
+  { to: "/evidence", label: "Evidence", icon: FileCheck2 },
   { to: "/audit", label: "Audit", icon: ScrollText },
 ]
 

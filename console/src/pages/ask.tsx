@@ -1,8 +1,10 @@
 import { useState } from "react"
-import { CornerDownLeft, Loader2, Sparkles } from "lucide-react"
+import { Link } from "react-router-dom"
+import { CornerDownLeft, FileCheck2, Loader2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   CoverageBar,
   EvidenceStrip,
@@ -10,7 +12,7 @@ import {
   PageHeader,
   Pill,
 } from "@/components/bits"
-import { REFUSAL_HELP, REFUSAL_LABEL, api, type Answer } from "@/lib/api"
+import { REFUSAL_HELP, REFUSAL_LABEL, api, type Answer, type BundleSummary } from "@/lib/api"
 import { formatSiteTime, useSite } from "@/lib/site"
 import { cn } from "@/lib/utils"
 
@@ -185,6 +187,8 @@ function AnswerCard({ a }: { a: Answer }) {
           </div>
         )}
 
+        {a.evidence.some((e) => e.keyframe_url) && <PrepareBundle a={a} />}
+
         {/* The cheapest correctness control in the whole query path: a person reading this spots
             a misread question instantly. */}
         {a.describes && (
@@ -235,4 +239,77 @@ function fmtDuration(seconds: number) {
   if (m < 60) return `${m} min`
   const h = Math.floor(m / 60)
   return m % 60 ? `${h} h ${m % 60} min` : `${h} h`
+}
+
+/** Turn the evidence behind an answer into a bundle a person in charge of the recorder and an expert can certify.
+ *  A purpose is required: it is printed on the draft certificate, and a bundle nobody can
+ *  explain the reason for is the first thing opposing counsel asks about. */
+function PrepareBundle({ a }: { a: Answer }) {
+  const [open, setOpen] = useState(false)
+  const [purpose, setPurpose] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<BundleSummary | null>(null)
+
+  async function prepare() {
+    setBusy(true)
+    setError(null)
+    try {
+      const ids = a.evidence.filter((e) => e.keyframe_url).map((e) => e.track_id)
+      setDone(await api.createBundle(ids, purpose.trim(), a.question))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (done) {
+    return (
+      <Notice tone="ok" title="Evidence bundle prepared">
+        {done.sources.length} original recording(s) and {done.frames} frame(s), sealed under
+        Merkle root <span className="font-mono text-xs">{done.merkle_root.slice(0, 16)}…</span>.{" "}
+        <a className="underline" href={api.bundleCertificateUrl(done.bundle_id)} target="_blank" rel="noreferrer">
+          Open the certificate draft
+        </a>{" "}
+        · <Link className="underline" to="/evidence">all bundles</Link>
+      </Notice>
+    )
+  }
+
+  if (!open) {
+    return (
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <FileCheck2 className="size-4" />
+        Prepare evidence bundle
+      </Button>
+    )
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border p-3">
+      <div className="text-sm font-medium">Prepare an evidence bundle from these frames</div>
+      <p className="text-xs text-muted-foreground">
+        Copies the original recordings, checks each against the hash taken when it was imported,
+        and drafts a section 63 certificate for the person in charge of the recorder and an expert to complete and sign.
+        It does not certify anything itself.
+      </p>
+      <Textarea
+        value={purpose}
+        onChange={(e) => setPurpose(e.target.value)}
+        placeholder="Purpose, e.g. Complaint 42 — stairwell incident, for the police"
+        rows={2}
+      />
+      {error && <Notice tone="critical" title="Bundle not prepared">{error}</Notice>}
+      <div className="flex gap-2">
+        <Button size="sm" onClick={prepare} disabled={busy || purpose.trim().length < 3}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <FileCheck2 className="size-4" />}
+          Prepare
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
 }

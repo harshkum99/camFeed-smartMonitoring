@@ -127,8 +127,8 @@ research dimensions flagged this as the single most dangerous decision in the pr
 > never become the system of record. Smart Cam Monitoring adds a compact, hash-sealed, searchable index on top —
 > and keeps that index for far longer than the DVR keeps video.
 
-This is a *stronger* sales position: **"Your DVR keeps 23 days. Smart Cam Monitoring keeps 24 months, hash-sealed and
-court-exportable, for less than the cost of one hard disk."** It also removes the customer's biggest
+This is a *stronger* sales position: **"Your DVR keeps 23 days. Smart Cam Monitoring keeps 24 months, hash-sealed, with evidence
+prepared for certification, for less than the cost of one hard disk."** It also removes the customer's biggest
 objection instead of creating it, and it is the only version a bank's risk team will sign.
 
 Raw video never leaves the LAN. Only keyframes, crops, embeddings and tags cross the WAN — about
@@ -260,19 +260,23 @@ evidentiary", and excluded from every evidence bundle.
 Natural-language camera search is no longer a differentiator — Eagle Eye gives it away free, Coram and
 Spot AI ship it, and open-source Frigate has it. What no competitor will build is India's legal artefact.
 
-**Bharatiya Sakshya Adhiniyam 2023 s.63(4)** and its Schedule (in force 1 July 2024) require every
-electronic record tendered in an Indian court to carry a certificate stating SHA-1/SHA-256/MD5 hashes with
-a hash report enclosed, with tick-boxes that explicitly name "DVR" and "Cloud" as sources, signed by the
-custodian (Part A) and an expert (Part B). Today Indian businesses satisfy this by hand, with a pen drive.
+**Bharatiya Sakshya Adhiniyam 2023 s.63(4)** and its Schedule (in force 1 July 2024) require that where a
+copy or computer output of footage is tendered in evidence, it carries a certificate in the statutory
+form — the hash value by one of SHA1, SHA256 or MD5 with a hash report enclosed, the source device (the
+tick boxes name "DVR" and "Cloud"), signed by the person in charge (Part A) and an expert (Part B).
+Producing the original recorder is the alternative route. Today Indian businesses do this by hand.
 
-We hash every frame at the moment of capture, chain the hashes per camera-hour, scrape device
-make/model/serial/MAC over ONVIF, stamp against an NIC/NPL-traceable NTP source, keep an append-only
-chain-of-custody log, and generate the filled Schedule Part A as a PDF on one click.
+**Built:** SHA-256 of each recording when it is imported, re-verified whenever it is exported; evidence
+bundles anyone can check with `shasum`; an append-only custody log; and a pre-filled draft of the
+Schedule certificate, for the person in charge and an expert to review and sign (D-007).
+**Planned, not yet built:** hashing at capture on the edge box with per-camera-hour hash chains, recorder
+make/model/serial scraped over ONVIF, and timestamps against an NIC/NPL-traceable NTP source.
 
 It is roughly three weeks of work with no ML in it. Verkada and Coram will never build an Indian evidence
 certificate generator. Videonetics and Staqu are per-channel detection vendors who have never framed their
-product as a legal artefact. And the proof point fits in a meeting: **hand the buyer a printed,
-court-filable certificate.**
+product as a legal artefact. And the proof point fits in a meeting: **hand the buyer a pre-filled
+certificate draft and a bundle their own IT person can verify with `shasum`.** Admissibility is the
+court's decision, never our claim — see [research/bsa-s63-certificate.md](research/bsa-s63-certificate.md).
 
 ---
 

@@ -20,7 +20,7 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from smartcam.evidence.store import sha256_file
@@ -103,6 +103,9 @@ def process_clip(
     info = probe_video(clip.path, runner=runner)
     result.info = info
     source_sha = sha256(clip.path)
+    # The time the hash was taken, not the time a row was later written: the hash report states
+    # it, and analysis of a clip can take minutes.
+    hashed_at = datetime.now(UTC)
     step = sample_step(info.src_fps, cfg.sample_fps)
     fp = fingerprint(cfg, detector, step)
     tracker = ByteTracker(info.src_fps / step, cfg.tracker, width=info.width, height=info.height)
@@ -172,7 +175,7 @@ def process_clip(
         return result
     result.clip = ClipRow(
         clip_id=cid, camera_id=camera_id, ts_start=start, analysed_end=analysed_to,
-        file_start=clip.starts_at,
+        file_start=clip.starts_at, source_hashed_at=hashed_at,
         file_end=max(clip.trusted_end, clip.declared_end or clip.trusted_end),
         keyframe_uris=keyframe_uris, frame_sha256=frame_hashes,
         source_uri=source_uri, source_sha256=source_sha,

@@ -9,6 +9,7 @@ import { RulesPage } from "@/pages/rules"
 import { ZonesPage } from "@/pages/zones"
 import { CamerasPage } from "@/pages/cameras"
 import { AuditPage } from "@/pages/audit"
+import { EvidencePage } from "@/pages/evidence"
 import { api, type Coverage } from "@/lib/api"
 import { SiteProvider } from "@/lib/site"
 
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/zones" element={<ZonesPage />} />
           <Route path="/cameras" element={<CamerasPage />} />
+          <Route path="/evidence" element={<EvidencePage />} />
           <Route path="/audit" element={<AuditPage />} />
         </Routes>
       </AppShell>

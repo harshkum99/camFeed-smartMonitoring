@@ -185,3 +185,51 @@ of `main` could not build the console. Fixed with a scoped negation.
 - **Known hazard, not fixed:** `drop_partitions_before` (003) drops whole months for every tenant.
   A future retention job built on it would delete the 2018-03 MEVA index. Retention must become
   per-tenant before any job calls it.
+
+---
+
+## D-007 — Evidence bundles and the section 63 certificate draft (2026-09-19)
+
+The product's USP, built. Research, verified statute text and the full field map are in
+[research/bsa-s63-certificate.md](research/bsa-s63-certificate.md).
+
+**What was built.** An evidence bundle is a zip of the original recordings behind an answer —
+each re-hashed and matched against the SHA-256 recorded when it was imported, or refused — plus
+the derived evidence frames, the index records, a manifest, `SHA256SUMS`, an RFC 6962 Merkle root,
+a standalone `verify_bundle.py`, and a draft of the statutory certificate. Anyone can verify it
+with `shasum` and Python; none of the checks needs our software.
+
+**Decided, and why:**
+
+| Decision | Choice | Reason |
+|---|---|---|
+| What the product produces | A **draft** for signature, never "a certificate" | s.63(4): signed by the person in charge and an expert, each on their own knowledge and belief. Admissibility is the court's (s.141). |
+| What is pre-filled | Only the hash line (SHA-256, ticked) and a pointer to the particulars annex | Everything else on the form is the signatory's own statement. Device make/model/serial describe the *recorder*; we hold camera details, which would misdescribe it. |
+| Part B | Entirely blank, with a verification pack annexed | It is the expert's finding. Who may sign it is unsettled (Pune Bar, 22 May 2026; R v. B, Madras HC). |
+| Hash | SHA-256 on receipt, recomputed on bundling; SHA-1 and MD5 also listed | The form offers one of three; SHA-256 is the one relied on. The report states it identifies the file *as received*, not the recorder's internal storage. |
+| Derived material | Hashed, listed separately, never on the form's hash line | Frames are re-encoded; presenting them as the record is the error the case law punishes. |
+| Each submission | A fresh numbered draft (D2, D3…) per request, rendered from the sealed bundle, logged with its hash | "At each instance where it is being submitted for admission." |
+| Bundle record | Immutable row (migration 006, guard G12); every access a custody-log row | An evidence record that can be updated has a history that must be taken on trust. |
+| Evidence route scope | Server configuration only, never the x-smartcam-* headers | The routes return real footage; the headers are not a security boundary. |
+| Form text | Encoded verbatim, tested line-by-line against the Gazette text in CI | A draft that drifts from the prescribed form invites an argument that it is not the form. |
+
+**Corrected in our own docs.** The USP and demo script claimed the certificate is required for
+"every electronic record" (it applies to copies and computer output — producing the original device
+is another route), that we hand over a "court-filable" certificate (only the court decides), and
+that "nobody else in the world does this" (Chat2Evidence already automates s.63 certificates for
+WhatsApp evidence). All three are fixed.
+
+**Found and fixed on the way:**
+
+- The API opened non-autocommit connections, so bundle rows and every custody entry were silently
+  rolled back while the route returned success. All API connections are now autocommit, with
+  explicit transactions around multi-row writes. Same class of bug as the ingest transaction in
+  D-006; it is now structurally prevented rather than fixed per route.
+- DVR exports reuse file names per hour; two same-named recordings from one camera collided inside
+  a bundle. Each original now sits in a folder named by its hash.
+- Imported footage had been kept in the session scratchpad and was lost between sessions; the
+  bundle builder correctly refused to proceed without it. Footage now lives in `var/footage`,
+  mirroring the public bucket's layout so `clips.source_uri` records the exact origin.
+
+**Before any customer sees it:** an Indian litigation advocate should review the draft template,
+the annex wording and all marketing copy. That is a spend decision, flagged to Harsh.

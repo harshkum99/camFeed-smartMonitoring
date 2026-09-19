@@ -29,31 +29,37 @@ The differentiation therefore cannot be the AI. It has to be something structura
 
 ## The USP
 
-> ### Smart Cam Monitoring turns the CCTV you already own into a searchable, court-admissible 24-month memory — for less than what one hard disk costs you.
+> ### Smart Cam Monitoring turns the CCTV you already own into a searchable, hash-sealed 24-month memory, with evidence prepared for certification — for less than what one hard disk costs you.
 
 Three things make this defensible in a way that "better AI" is not.
 
 ### 1. It is India's legal system, encoded in software
 
 **Bharatiya Sakshya Adhiniyam 2023, section 63(4)** and its Schedule — in force since 1 July 2024 —
-require every electronic record tendered in an Indian court to carry a certificate stating the
-SHA-1/SHA-256/MD5 hash **with a hash report enclosed**, identifying the source device (the form has
-tick-boxes that explicitly name "DVR" and "Cloud"), signed by the custodian in Part A and by an expert in
-Part B, **at each instance of submission**.
+require that where a copy or computer output of footage is tendered in evidence, it carries a certificate
+in the statutory form, submitted "at each instance" it is offered for admission. The form asks for the
+source device (its tick boxes name "DVR" and "Cloud"), the hash value by one of SHA1, SHA256 or MD5, and a
+hash report enclosed; Part A is signed by the person in charge of the recorder and Part B by an expert.
+Producing the original recorder is the alternative route (Arjun Panditrao Khotkar, 2020).
 
-Today, Indian businesses satisfy this by hand, with a pen drive and a notary.
+Today, Indian businesses do this by hand, with a pen drive, a Word template and a notary.
 
-We do it at capture: SHA-256 every frame, chain the hashes per camera-hour into a Merkle root, scrape
-device make/model/serial/MAC over ONVIF, timestamp against an NIC/NPL-traceable NTP source (which CERT-In
-mandates anyway — a compliance chore turned into a feature), keep an append-only chain-of-custody log, and
-generate the filled Schedule Part A as a PDF on one click.
+We carry the evidence trail from import to the courtroom door: SHA-256 each recording on receipt and
+re-verify it on every export, keep an append-only chain-of-custody log, and prepare a **pre-filled
+draft** of the Schedule certificate — the statutory form reproduced exactly, the hash report,
+device and recording particulars, and a verification pack for the expert — for the person in charge
+and the expert to review and sign. Whether the record is admitted is for the court. Research and the
+rules the generator follows: [research/bsa-s63-certificate.md](research/bsa-s63-certificate.md).
 
 **Why it is defensible:** it is not a technical moat, it is a jurisdictional one. Verkada, Coram, Spot AI
-and Eagle Eye will never build an Indian evidence-certificate generator — the market is invisible from San
-Francisco. Videonetics, Staqu, Awiros and Vehant are per-channel detection vendors who have never framed
+and Eagle Eye are unlikely to build an Indian evidence-certificate workflow — the market is invisible from
+San Francisco. It is not unique in India: at least one product (Chat2Evidence) already automates s.63
+certificates for WhatsApp evidence, and templates are everywhere. What is rarer is a CCTV system whose
+hash trail starts when the footage arrives rather than when someone needs a certificate. Videonetics, Staqu, Awiros and Vehant are per-channel detection vendors who have never framed
 their product as a legal artefact. It takes about three weeks to build and contains no machine learning.
 
-**The proof point fits in a meeting:** hand the buyer a printed, court-filable certificate.
+**The proof point fits in a meeting:** hand the buyer a pre-filled certificate draft, with the hash
+report and custody log, that their own IT person can verify with `shasum` in front of them.
 
 ### 2. It inverts the storage claim from a liability into the pitch
 
@@ -107,7 +113,7 @@ cameras, the deal dies.
 | Site platform fee (edge agent, full-site indexing, Talk-to-CCTV, daily report) | **₹4,999 / site / month** |
 | Continuous monitoring (only on cameras carrying an active real-time rule — typically 3–6 of 20) | **₹899 / camera / month** |
 | Compliance pack (vertical SOP library + auditor export) — *priced against the fine, not the camera* | **₹15,000–40,000 / site / month** |
-| Evidence certificate export | 20/month included, then **₹500** per certified bundle |
+| Evidence certificate export | 20/month included, then **₹500** per prepared evidence bundle |
 | Retention depth | 12 months included; +₹149 (24mo), +₹269 (36mo) |
 | Track & Trace | +₹200/camera/month, **or ₹5,000 per investigation** |
 | Air-gapped / government | ₹4,500/camera one-time perpetual + 18% AMC, min 100 cameras |
@@ -189,4 +195,4 @@ with no consent cure and a ₹200 crore ceiling), and BFSI (6–12 month securit
 
 ## The one-line positioning
 
-> **Smart Cam Monitoring gives the cameras you already own a memory that stands up in court.**
+> **Smart Cam Monitoring gives the cameras you already own a memory you can search, verify, and hand to an expert.**

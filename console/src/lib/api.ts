@@ -183,6 +183,36 @@ export interface AuditRow {
   latency_ms: number | null
 }
 
+export interface BundleSummary {
+  bundle_id: string
+  created_at: string
+  requested_by: string
+  purpose: string
+  question: string | null
+  window: { from: string; to: string }
+  cameras: number
+  frames: number
+  tracks: number
+  sources: { file: string; sha256: string; included: boolean }[]
+  merkle_root: string
+  manifest_sha256: string
+  archive_sha256: string
+  certificate: boolean
+  clock_warnings: string[]
+  warnings?: string[]
+}
+
+export interface CustodyEntry {
+  at: string
+  actor: string
+  action: string
+  detail: Record<string, unknown>
+}
+
+export interface BundleDetail extends BundleSummary {
+  custody: CustodyEntry[]
+}
+
 /* ---------- calls ---------- */
 
 export const api = {
@@ -225,6 +255,27 @@ export const api = {
     ),
 
   audit: (limit = 60) => request<AuditRow[]>(`/api/audit?limit=${limit}`),
+
+  createBundle: (track_ids: string[], purpose: string, question?: string) =>
+    request<BundleSummary>("/api/evidence/bundles", {
+      method: "POST",
+      body: JSON.stringify({ track_ids, purpose, question }),
+    }),
+  bundles: () => request<BundleSummary[]>("/api/evidence/bundles"),
+  bundle: (id: string) => request<BundleDetail>(`/api/evidence/bundles/${id}`),
+  bundleArchiveUrl: (id: string) => `${API_BASE}/api/evidence/bundles/${id}/archive`,
+  bundleCertificateUrl: (id: string) => `${API_BASE}/api/evidence/bundles/${id}/certificate`,
+  /** Issues the next numbered draft for a new submission. A POST, because it uses up a number
+   *  and writes to the custody log; the PDF comes back as a blob for the browser to open. */
+  newDraft: async (id: string): Promise<{ blob: Blob; draftId: string }> => {
+    const res = await fetch(`${API_BASE}/api/evidence/bundles/${id}/drafts`, {
+      method: "POST",
+      headers: HEADERS,
+      credentials: API_BASE ? "include" : "same-origin",
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? res.statusText)
+    return { blob: await res.blob(), draftId: res.headers.get("x-draft-id") ?? "" }
+  },
 }
 
 /* ---------- shared presentation vocabulary ----------
